@@ -61,7 +61,8 @@ if __name__ == "__main__":
         t_ps,
         ch,
 
-        show_fit=True,
+        Ta_s_max=1,
+        # show_fit=True,
     )
 
     # difference_ps, t_a, t_b, figure, axis = timetag_channel_time_difference(

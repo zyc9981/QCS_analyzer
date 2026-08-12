@@ -87,8 +87,10 @@ def qcs_kernal(
     T_file_s = (np.max(t_ps) - np.min(t_ps)) * 1e-12
     buffer_size = int(np.floor(T_file_s / Ta_s_init))
     point_records = np.full(buffer_size, np.nan, dtype=float)
-    tau_s_records = np.full(buffer_size, np.nan, dtype=float)
+    tau_ps_records = np.full(buffer_size, np.nan, dtype=float)
+    Ta_s_records = np.full(buffer_size, np.nan, dtype=float)
     fwhm_records = np.full(buffer_size, np.nan, dtype=float)
+    sigma_records = np.full(buffer_size, np.nan, dtype=float)
     tau_s_uncertainty_records = np.full(buffer_size, np.nan, dtype=float)
     fwhm_uncertainty_records = np.full(buffer_size, np.nan, dtype=float)
     coincidence_records = np.full(buffer_size, np.nan, dtype=float)
@@ -245,8 +247,8 @@ def qcs_kernal(
                 show=show_fit,
             )
 
-            fwhm = 2.355 * np.sqrt(2*702.672**2 + fit["parameters"]["sigma"]**2)
-            print(f"FWHM: {fwhm:.2f}", f"gamma: {fit["parameters"]["sigma"]:.2f}")
+            # fwhm = 2.355 * np.sqrt(2*702.672**2 + fit["parameters"]["sigma"]**2)
+            # print(f"FWHM: {fwhm:.2f}", f"gamma: {fit["parameters"]["sigma"]:.2f}")
             # if update_fit_parameters and fit["success"]:
             #     fit_parameter_guess.update(fit["parameters"])
 
@@ -265,8 +267,10 @@ def qcs_kernal(
         # ------------------------------------------------------------
 
         point_records[acquisition_index] = acquisition["point_ps"]
-        tau_s_records[acquisition_index] = fit["center"]
-        fwhm_records[acquisition_index] = fwhm
+        tau_ps_records[acquisition_index] = fit["center"]
+        Ta_s_records[acquisition_index] = state["Ta_s"]
+        # fwhm_records[acquisition_index] = fwhm
+        sigma_records[acquisition_index] = fit["parameters"]["sigma"]
         tau_s_uncertainty_records[acquisition_index] = fit["center_uncertainty"]
         # fwhm_uncertainty_records[acquisition_index] = fit["fwhm_uncertainty"]
         
@@ -302,4 +306,28 @@ def qcs_kernal(
     # After scan: plot results
     # ------------------------------------------------------------
 
+    # fig, axes = plt.subplots(len(display_values), 1, sharex=True, squeeze=False)
+    fig, axes = plt.subplots(3, 1, sharex=True, squeeze=False)
+    axes = axes[:, 0]
 
+    ax1 = axes[0]
+    ax1.plot(point_records[:acquisition_index] * 1e-12, tau_ps_records[:acquisition_index], "o-")
+    ax1.set_ylabel(r"$\tau$ (ps)")
+    ax1.grid(True)
+
+    ax2 = axes[1]
+    ax2.plot(point_records[:acquisition_index] * 1e-12, Ta_s_records[:acquisition_index], "o-")
+    ax2.set_ylabel(r"$T_a$ (s)")
+    ax2.grid(True)
+
+    ax3 = axes[2]
+    # ax3.plot(point_records[:acquisition_index] * 1e-12, fwhm_records[:acquisition_index], "o-")
+    # ax3.set_ylabel(r"FWHM (ps)")
+    ax3.plot(point_records[:acquisition_index] * 1e-12, sigma_records[:acquisition_index], "o-")
+    ax3.set_ylabel(r"$\sigma$ (ps)")
+    ax3.grid(True)
+
+    axes[-1].set_xlabel("Record Points (s)")
+
+    fig.tight_layout()
+    plt.show()
