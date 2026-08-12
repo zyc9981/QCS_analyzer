@@ -30,6 +30,25 @@ if __name__ == "__main__":
     # timetag_to_h5_fast()
     # trancate_timetag(30)
 
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from qcs_analyzer._implementation import _g2calib_2, _g2calib_1, _g2calib_2_Hfunc
+
+    # x = np.linspace(-10000, 10000, 10000)
+    # y = _g2calib_2(
+    #     x,
+    #     height=1.0,
+    #     center=0.0,
+    #     # sigma=1000.0,
+    #     sigma=0.0,
+    #     offset=0.0,
+    # )
+    # plt.plot(x, y)
+    # plt.xlabel("Delay (ps)")
+    # plt.ylabel(r"$g^{(2)}$")
+    # plt.grid(True)
+    # plt.show()
+
     # results = load_g2_results()
     # fit = fit_g2(
     #     results,
@@ -45,6 +64,7 @@ if __name__ == "__main__":
     #     use_rate=100e6,
     #     show=True,
     # )
+    # print(f"sigma: {fit["parameters"]["sigma"]:.8g}", f"gamma: {fit["parameters"]["gamma"]:.8g}")
 
     t_ps, ch, filename = load_timetag(return_filename=True)
 
@@ -61,6 +81,7 @@ if __name__ == "__main__":
         t_ps,
         ch,
 
+        fit_curve="g2calib_2",
         Ta_s_max=1,
         # show_fit=True,
     )

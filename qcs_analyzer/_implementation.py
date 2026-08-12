@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tkinter import Tk, filedialog
 from scipy.fft import fft, fftshift, fftfreq, ifft, ifftshift
-from scipy.special import erfc, erfcx
+from scipy.special import erfc, erfcx, erf
 
 try:
     from scipy.io import loadmat
@@ -1850,7 +1850,7 @@ def _expogaussconv_with_offset(x, height, center, gamma, sigma, offset):
 def _g2calib_1(x, height, center, sigma, offset):
     """Symmetric exponential-Gaussian convolution with a constant offset."""
     # gamma = 0.702672
-    gamma = 702.672
+    gamma = 702.67227
     distance = np.abs(x - center)
     root_two_sigma = np.sqrt(2.0) * sigma
     z1 = (sigma**2 / gamma - distance) / root_two_sigma
@@ -1861,6 +1861,63 @@ def _g2calib_1(x, height, center, sigma, offset):
     right_exponent = -0.5 * (distance / sigma) ** 2 - 0.5 * (sigma / gamma) ** 2
     right_term = np.exp(right_exponent) * erfcx(z2)
     return offset + height * (left_term + right_term)
+
+
+_GAMMA = 702.67227
+_SIGMAG = 78.800111
+_A = 1.0 / (np.sqrt(2.0) * _SIGMAG)
+_B = 1.0 / _GAMMA
+_COEF1 = _GAMMA * np.exp(-_SIGMAG**2 / _GAMMA**2)
+_COEF2 = _GAMMA * np.exp(-_SIGMAG**2 / _GAMMA**2 / 2)
+_OFFSET = _B / 2 / _A
+
+
+def _g2calib_2_Hfunc(d):
+    # gamma = 702.67227
+    # sigmaG = 78.800111
+    # a = 1/(np.sqrt(2) * sigmaG)
+    # b = 1/gamma
+
+    z1 = _SIGMAG ** 2 / _GAMMA - d
+    z2 = _SIGMAG ** 2 / _GAMMA + d
+
+    term1 = -_COEF1 * np.exp(z1 * _B) * erfc(z1 * _A)
+    term2 = -_COEF2 * erf(z1 * _A - _OFFSET)
+    term3 = _COEF1 * np.exp(z2 * _B) * erfc(z2 * _A)
+    term4 = _COEF2 * erf(z2 * _A - _OFFSET)
+
+    # term1 = -gamma * np.exp(-sigmaG**2 / gamma**2) * np.exp(z1 * b) * erfc(z1 * a)
+    # term2 = -gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(z1 * a - b / 2 / a)
+    # term3 = gamma * np.exp(-sigmaG**2 / gamma**2) * np.exp(z2 * b) * erfc(z2 * a)
+    # term4 = gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(z2 * a - b / 2 / a)
+
+    # term1 = gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(d * a)
+    # term2 = -gamma * np.exp(-d * b) * erfc((sigmaG / gamma - d / sigmaG) / np.sqrt(2))
+    # term3 = gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(d * a)
+    # term4 = gamma * np.exp(d * b) * erfc((sigmaG / gamma + d / sigmaG) / np.sqrt(2))
+
+    return term1 + term2 + term3 + term4
+
+
+def _g2calib_2(x, height, center, sigma, offset):
+    d = x - center
+    if sigma > 0.01:
+        term = (_g2calib_2_Hfunc(d + sigma / 2) - _g2calib_2_Hfunc(d - sigma / 2)) / sigma
+    else:
+        term = (_g2calib_2_Hfunc(d + 0.01 / 2) - _g2calib_2_Hfunc(d - 0.01 / 2)) / 0.01
+
+    return offset + height*term
+
+    # distance = np.abs(x - center)
+    # root_two_sigma = np.sqrt(2.0) * sigmaG
+    # z1 = (sigmaG**2 / gamma - distance) / root_two_sigma
+    # z2 = (sigmaG**2 / gamma + distance) / root_two_sigma
+
+    # # erfcx keeps exp(distance / gamma) * erfc(z2) finite in the tails.
+    # left_term = np.exp(-distance / gamma) * erfc(z1)
+    # right_exponent = -0.5 * (distance / sigmaG) ** 2 - 0.5 * (sigmaG / gamma) ** 2
+    # right_term = np.exp(right_exponent) * erfcx(z2)
+    # return offset + height * (left_term + right_term)
 
 
 FIT_CURVES = {
@@ -1903,6 +1960,14 @@ FIT_CURVES = {
         "positive_parameters": ("sigma", ),
         "fwhm_factor": 2.0 * np.sqrt(2.0 * np.log(2.0)),
         "label": "g2_calib_No_1",
+    },
+    "g2calib_2": {
+        "function": _g2calib_2,
+        "parameters": ("height", "center", "sigma", "offset"),
+        "scale_parameter": "sigma",
+        "positive_parameters": ("sigma", ),
+        "fwhm_factor": 2.0 * np.sqrt(2.0 * np.log(2.0)),
+        "label": "g2_calib_No_2",
     },
 }
 FIT_CURVE_ALIASES = {"exp": "expo", "exponential": "expo"}

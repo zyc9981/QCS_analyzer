@@ -286,7 +286,7 @@ def qcs_kernal(
             Ta_s = np.min([fwhm_calib_ps / 5 / np.abs(udrift) * 1e-12, Ta_s_max])
             state["Ta_s"] = np.max([Ta_s_init, Ta_s])
 
-            print(state["u0"], udrift, fwhm_calib_ps / 5 / np.abs(udrift) * 1e-12, state["Ta_s"])
+            print(f"Ta_s: {state["Ta_s"]:.2f}")
         else:
             state["Ta_s"] = Ta_s
 
