@@ -2052,10 +2052,10 @@ def fit_g2(results, curve, parameters, *, fit_window=None, use_rate=True, show=T
     }
 
     status = "Fit" if fit_succeeded else "Input Parameters (fit did not converge)"
-    print(f"--- {definition['label']} {status} ---")
-    for name in parameter_names:
-        print(f"{name.capitalize()}: {fitted_parameters[name]:.6g}")
-    print(f"FWHM: {fwhm:.6g}")
+    # print(f"--- {definition['label']} {status} ---")
+    # for name in parameter_names:
+    #     print(f"{name.capitalize()}: {fitted_parameters[name]:.6g}")
+    # print(f"FWHM: {fwhm:.6g}")
 
     if show:
         fig, ax = plt.subplots()

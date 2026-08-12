@@ -76,7 +76,7 @@ def qcs_kernal(
         "tau_span_ps": float(tau_span_ps_init),
         "u0": float(u0_init),
         "T_lastmid_ps": float(0.0),
-        "T_laststart_ps": float(0.0),
+        # "T_laststart_ps": float(0.0),
         # "u1": 0.0,
     }
 
@@ -130,17 +130,17 @@ def qcs_kernal(
 
         acquisition_t_0 = t_0[index_0:end_index_0]
         acquisition_t_1 = t_1[index_1:end_index_1]
-        acquisition_t_1 = acquisition_t_1 - (acquisition_t_1 - acquisition_t_1[0]) * state["u0"]
+        acquisition_t_1 = acquisition_t_1 - (acquisition_t_1 - acquisition_t_1[0]) * state["u0"] + state["u0"] * state["Ta_s"] * 1e12 / 2
 
-        # Collect ref events inside this chronological interval.
-        end_index_ref = np.searchsorted(t_ref_0, window_end_ps, side="left")
-        acquisition_ref_0 = t_ref_0[index_ref:end_index_ref]
-        acquisition_ref_1 = t_ref_1[index_ref:end_index_ref]
-        acquisition_ref_1 = acquisition_ref_1 - (acquisition_ref_1 - acquisition_ref_1[0]) * state["u0"]
+        # # Collect ref events inside this chronological interval.
+        # end_index_ref = np.searchsorted(t_ref_0, window_end_ps, side="left")
+        # acquisition_ref_0 = t_ref_0[index_ref:end_index_ref]
+        # acquisition_ref_1 = t_ref_1[index_ref:end_index_ref]
+        # acquisition_ref_1 = acquisition_ref_1 - (acquisition_ref_1 - acquisition_ref_1[0]) * state["u0"]
 
-        plt.figure()
-        plt.plot(acquisition_ref_1 - acquisition_ref_0)
-        plt.show()
+        # plt.figure()
+        # plt.plot(acquisition_ref_1 - acquisition_ref_0)
+        # plt.show()
 
         acquisition = {
             "start_ps": window_start_ps,
@@ -245,13 +245,14 @@ def qcs_kernal(
                 show=show_fit,
             )
 
+            fwhm = 2.355 * np.sqrt(2*702.672**2 + fit["parameters"]["sigma"]**2)
+            print(f"FWHM: {fwhm:.2f}", f"gamma: {fit["parameters"]["sigma"]:.2f}")
             # if update_fit_parameters and fit["success"]:
             #     fit_parameter_guess.update(fit["parameters"])
 
         except Exception as exc:
             raise
 
-            # print(f"Time-dependent g2 fit failed at t_stop={t_stop:.6g} s: {exc}")
             print(f"Time-dependent g2 fit failed at t_stop={(acquisition["point_ps"]*1e-12):.6g} s: {exc}")
             fit = None
             exc_value = exc
@@ -265,9 +266,9 @@ def qcs_kernal(
 
         point_records[acquisition_index] = acquisition["point_ps"]
         tau_s_records[acquisition_index] = fit["center"]
-        fwhm_records[acquisition_index] = fit["fwhm"]
+        fwhm_records[acquisition_index] = fwhm
         tau_s_uncertainty_records[acquisition_index] = fit["center_uncertainty"]
-        fwhm_uncertainty_records[acquisition_index] = fit["fwhm_uncertainty"]
+        # fwhm_uncertainty_records[acquisition_index] = fit["fwhm_uncertainty"]
         
         if acquisition_index > 0:
             udrift = (fit["center"] - tau_predicted_ps) / (acquisition["point_ps"] - state["T_lastmid_ps"])
@@ -294,7 +295,11 @@ def qcs_kernal(
         acquisition_index += 1
         index_0 = end_index_0
         index_1 = end_index_1
-        index_ref = end_index_ref
+        # index_ref = end_index_ref
         window_start_ps = window_end_ps
 
-    
+    # ------------------------------------------------------------
+    # After scan: plot results
+    # ------------------------------------------------------------
+
+
