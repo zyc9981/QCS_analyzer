@@ -1,0 +1,10 @@
+# Editor and Python artifacts
+.vscode/
+__pycache__/
+*.py[cod]
+
+# Large experimental/raw data
+*.h5
+
+# Optional: generated analysis data
+*.npz
