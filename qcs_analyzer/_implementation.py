@@ -1871,32 +1871,67 @@ _COEF1 = _GAMMA * np.exp(-_SIGMAG**2 / _GAMMA**2)
 _COEF2 = _GAMMA * np.exp(-_SIGMAG**2 / _GAMMA**2 / 2)
 _OFFSET = _B / 2 / _A
 
+_EXP_ERFC_SLOPE = _B / _A
+
+
+def _exp_zb_erfc_za(z):
+    """Numerically stable evaluation of exp(z*_B) * erfc(z*_A)."""
+    z = np.asarray(z, dtype=float)
+    q = z * _A
+    result = np.empty_like(q)
+
+    # For q >= 0:
+    # exp(q*c) erfc(q) = exp(-(q-c/2)^2 + c^2/4) erfcx(q)
+    positive = q >= 0
+    c = _EXP_ERFC_SLOPE
+    result[positive] = (
+        np.exp(-(q[positive] - c / 2.0) ** 2 + c**2 / 4.0)
+        * erfcx(q[positive])
+    )
+
+    # Here z*_B <= 0, so the ordinary expression cannot overflow.
+    result[~positive] = np.exp(z[~positive] * _B) * erfc(q[~positive])
+
+    return result
+
 
 def _g2calib_2_Hfunc(d):
-    # gamma = 702.67227
-    # sigmaG = 78.800111
-    # a = 1/(np.sqrt(2) * sigmaG)
-    # b = 1/gamma
-
     z1 = _SIGMAG ** 2 / _GAMMA - d
     z2 = _SIGMAG ** 2 / _GAMMA + d
 
-    term1 = -_COEF1 * np.exp(z1 * _B) * erfc(z1 * _A)
+    term1 = -_COEF1 * _exp_zb_erfc_za(z1)
     term2 = -_COEF2 * erf(z1 * _A - _OFFSET)
-    term3 = _COEF1 * np.exp(z2 * _B) * erfc(z2 * _A)
+    term3 = _COEF1 * _exp_zb_erfc_za(z2)
     term4 = _COEF2 * erf(z2 * _A - _OFFSET)
 
-    # term1 = -gamma * np.exp(-sigmaG**2 / gamma**2) * np.exp(z1 * b) * erfc(z1 * a)
-    # term2 = -gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(z1 * a - b / 2 / a)
-    # term3 = gamma * np.exp(-sigmaG**2 / gamma**2) * np.exp(z2 * b) * erfc(z2 * a)
-    # term4 = gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(z2 * a - b / 2 / a)
-
-    # term1 = gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(d * a)
-    # term2 = -gamma * np.exp(-d * b) * erfc((sigmaG / gamma - d / sigmaG) / np.sqrt(2))
-    # term3 = gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(d * a)
-    # term4 = gamma * np.exp(d * b) * erfc((sigmaG / gamma + d / sigmaG) / np.sqrt(2))
-
     return term1 + term2 + term3 + term4
+
+
+# def _g2calib_2_Hfunc(d):
+#     # gamma = 702.67227
+#     # sigmaG = 78.800111
+#     # a = 1/(np.sqrt(2) * sigmaG)
+#     # b = 1/gamma
+
+#     z1 = _SIGMAG ** 2 / _GAMMA - d
+#     z2 = _SIGMAG ** 2 / _GAMMA + d
+
+#     term1 = -_COEF1 * np.exp(z1 * _B) * erfc(z1 * _A)
+#     term2 = -_COEF2 * erf(z1 * _A - _OFFSET)
+#     term3 = _COEF1 * np.exp(z2 * _B) * erfc(z2 * _A)
+#     term4 = _COEF2 * erf(z2 * _A - _OFFSET)
+
+#     # term1 = -gamma * np.exp(-sigmaG**2 / gamma**2) * np.exp(z1 * b) * erfc(z1 * a)
+#     # term2 = -gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(z1 * a - b / 2 / a)
+#     # term3 = gamma * np.exp(-sigmaG**2 / gamma**2) * np.exp(z2 * b) * erfc(z2 * a)
+#     # term4 = gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(z2 * a - b / 2 / a)
+
+#     # term1 = gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(d * a)
+#     # term2 = -gamma * np.exp(-d * b) * erfc((sigmaG / gamma - d / sigmaG) / np.sqrt(2))
+#     # term3 = gamma * np.exp(-sigmaG**2 / gamma**2 / 2) * erf(d * a)
+#     # term4 = gamma * np.exp(d * b) * erfc((sigmaG / gamma + d / sigmaG) / np.sqrt(2))
+
+#     return term1 + term2 + term3 + term4
 
 
 def _g2calib_2(x, height, center, sigma, offset):

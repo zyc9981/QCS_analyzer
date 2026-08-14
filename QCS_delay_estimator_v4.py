@@ -20,6 +20,7 @@ from qcs_analyzer.analysis import g2_process_time_dependent, timetag_correction,
 from qcs_analyzer.io import load_timetag
 from qcs_analyzer.results import save_time_dependent_results
 from qcs_analyzer.qcs_kernal import qcs_kernal
+from qcs_analyzer.allan_deviation import allan_deviation_estimator
 
 __all__ = _QCS_ANALYZER_PUBLIC_API
 
@@ -30,10 +31,9 @@ if __name__ == "__main__":
     # timetag_to_h5_fast()
     # trancate_timetag(30)
 
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from qcs_analyzer._implementation import _g2calib_2, _g2calib_1, _g2calib_2_Hfunc
-
+    # import matplotlib.pyplot as plt
+    # import numpy as np
+    # from qcs_analyzer._implementation import _g2calib_2, _g2calib_1, _g2calib_2_Hfunc
     # x = np.linspace(-10000, 10000, 10000)
     # y = _g2calib_2(
     #     x,
@@ -68,21 +68,31 @@ if __name__ == "__main__":
 
     t_ps, ch, filename = load_timetag(return_filename=True)
 
-    # t_ps, ch, details = timetag_correction(
-    #     t_ps, ch,
-    #     ch_qutag=2,
-    #     ch_hh=7,
-    #     return_parameters=True,
-    #     correction_mode="global"
-    #     # correction_mode="per_trigger"
-    # )
+    # allan_deviation_estimator(t_ps, ch, number_of_tau_points=100)
+    # sys.exit()
 
+    t_ps, ch, details = timetag_correction(
+        t_ps, ch,
+        ch_qutag=2,
+        ch_hh=7,
+        return_parameters=True,
+        correction_mode="global"
+        # correction_mode="per_trigger"
+    )
+
+    Ta_s = 0.02
     qcs_kernal(
         t_ps,
         ch,
 
+        Ta_s_init=Ta_s,
+
         fit_curve="g2calib_2",
-        Ta_s_max=1,
+        time_bin_ps_init=100,
+        # Ta_s_max=0.5,
+        Ta_s_max=Ta_s,
+
+        Ta_ref_s=0.1
         # show_fit=True,
     )
 
