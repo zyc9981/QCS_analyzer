@@ -110,7 +110,7 @@ def qcs_kernal(
 
     # Temporary: calculate u0_init from classical recorded pulses
     state["u0"] = u0_estimator(t_ref_0, t_ref_1)
-    print(state["u0"])
+    # print(state["u0"])
 
     T_file_s = (np.max(t_ps) - np.min(t_ps)) * 1e-12
     buffer_size = int(np.floor(T_file_s / Ta_s_init))
@@ -122,6 +122,8 @@ def qcs_kernal(
     fwhm_records = np.full(buffer_size, np.nan, dtype=float)
     sigma_records = np.full(buffer_size, np.nan, dtype=float)
     tau_s_uncertainty_records = np.full(buffer_size, np.nan, dtype=float)
+    CC_count_records = np.full(buffer_size, np.nan, dtype=float)
+    # S_peak_records = np.full(buffer_size, np.nan, dtype=float)
     # fwhm_uncertainty_records = np.full(buffer_size, np.nan, dtype=float)
     coincidence_records = np.full(buffer_size, np.nan, dtype=float)
 
@@ -217,7 +219,8 @@ def qcs_kernal(
         t_hi = tau_predicted_ps + state["tau_span_ps"] * 0.5
         time_bin_ps = state["time_bin_ps"]
         edges = np.arange(t_lo, t_hi + time_bin_ps, time_bin_ps)
-    
+
+        print(t_lo, t_lo-t_hi, time_bin_ps, state["tau_span_ps"])
         if len(edges) < 2:
             raise ValueError("Window too small for given bin width. Increase span or decrease bin.")
     
@@ -265,6 +268,8 @@ def qcs_kernal(
                 results["centers"][np.argmax(results["histogram"])]
             )
 
+            # if acquisition["point_ps"] > 3.36e12:
+            #     show_fit = True,
             fit = fit_g2(
                 results,
                 curve=fit_curve,
@@ -294,6 +299,8 @@ def qcs_kernal(
         sigma_records[acquisition_index] = fit["parameters"]["sigma"]
         tau_s_uncertainty_records[acquisition_index] = fit["center_uncertainty"]
         # fwhm_uncertainty_records[acquisition_index] = fit["fwhm_uncertainty"]
+        CC_count_records[acquisition_index] = np.sum(results["histogram"])
+        # S_peak_records[acquisition_index] = np.sqrt(np.sum(results["histogram"]) ** 2 * np.size(results["centers"]) / np.size(acquisition_t_0) / np.size(acquisition_t_1))
 
         tau_ref_ps, tau_ref_uncertainty_ps, N_ref_samples = qcs_ref_estimator(
             acquisition_ref_1 - acquisition_ref_0,
@@ -316,7 +323,7 @@ def qcs_kernal(
             Ta_s = np.round((fwhm_calib_ps / 5 / np.abs(udrift) * 1e-12) / Ta_s_init) * Ta_s_init
             Ta_s = np.min([Ta_s, Ta_s_max])
             state["Ta_s"] = np.max([Ta_s_init, Ta_s])
-            state["time_bin_ps"] = round(time_bin_ps_init / state["Ta_s"] * Ta_s_init / 10.0) * 10.0
+            # state["time_bin_ps"] = round(time_bin_ps_init / state["Ta_s"] * Ta_s_init / 10.0) * 10.0
 
             # print(f"Ta_s: {state["Ta_s"]:.2f}")
         else:
@@ -343,7 +350,7 @@ def qcs_kernal(
     axes = axes[:, 0]
 
     ax1 = axes[0]
-    ax1.plot(point_records[:acquisition_index] * 1e-12, tau_ps_records[:acquisition_index], "o-")
+    ax1.plot(point_records[:acquisition_index] * 1e-12, tau_ps_records[:acquisition_index] - tau_ps_records[0], "o-")
     ax1.set_ylabel(r"$\tau$ (ps)")
     ax1.grid(True)
 
@@ -360,15 +367,26 @@ def qcs_kernal(
     ax3.grid(True)
 
     ax4 = axes[3]
-    ax4.plot(point_records[:acquisition_index] * 1e-12, tau_ref_ps_records[:acquisition_index], "o-")
-    ax4.set_ylabel(r"$\tau_{ref}$ (ps)")
+    ax4.plot(point_records[:acquisition_index] * 1e-12, CC_count_records[:acquisition_index], "o-")
+    ax4.set_ylabel(r"CC")
     ax4.grid(True)
 
     ax5 = axes[4]
-    ax5.plot(point_records[:acquisition_index] * 1e-12, tau_ref_uncertainty_ps_records[:acquisition_index], "o-")
-    ax5.set_ylabel(r"$\delta\tau_{ref}$ (ps)")
+    ax5.plot(point_records[:acquisition_index] * 1e-12, tau_ref_ps_records[:acquisition_index] - tau_ref_ps_records[0], "o-")
+    ax5.set_ylabel(r"$\tau_{ref}$ (ps)")
     ax5.grid(True)
-    ax5.set_ylim(bottom=0)
+
+    # ax6 = axes[5]
+    # ax6.plot(point_records[:acquisition_index] * 1e-12, tau_ref_uncertainty_ps_records[:acquisition_index], "o-")
+    # ax6.set_ylabel(r"$\delta\tau_{ref}$ (ps)")
+    # ax6.grid(True)
+    # ax6.set_ylim(bottom=0)
+
+    # ax6 = axes[5]
+    # ax6.plot(point_records[:acquisition_index] * 1e-12, S_peak_records[:acquisition_index], "o-")
+    # ax6.set_ylabel(r"S")
+    # ax6.grid(True)
+    # ax6.set_ylim(bottom=0)
 
     axes[-1].set_xlabel("Record Points (s)")
     fig1.tight_layout()
@@ -379,11 +397,31 @@ def qcs_kernal(
 
     tau_diff = tau_ps_records[:acquisition_index] - tau_ref_ps_records[:acquisition_index]
     ax1 = axes[0]
-    ax1.plot(point_records[:acquisition_index] * 1e-12, tau_diff, "o-")
+    ax1.plot(point_records[:acquisition_index] * 1e-12, tau_diff - np.mean(tau_diff), "o-")
     ax1.set_ylabel(r"$\tau$ (ps)")
     ax1.grid(True)
+
+    ax2 = axes[1]
+    ax2.plot(point_records[:acquisition_index] * 1e-12, CC_count_records[:acquisition_index], "o-")
+    ax2.set_ylabel(r"CC")
+    ax2.grid(True)
+
+    axes[-1].set_xlabel("Record Points (s)")
+    fig2.tight_layout()
 
     print(np.std(tau_diff))
     print(np.mean(tau_diff))
 
     plt.show()
+
+    return {
+        "center": point_records,
+        "tau": tau_ps_records,
+        "tau_ref": tau_ref_ps_records,
+        "tau_ref_uncertainty": tau_ref_uncertainty_ps_records,
+        "tau_diff": tau_diff,
+        "Ta": Ta_s_records,
+        "sigma": sigma_records,
+        "figure": fig1,
+        "axes": axes,
+    }

@@ -106,6 +106,47 @@ def _require_selected_filename(filename, action="file"):
     return filename
 
 
+def save_dict_npz(data_dict, output_filename=None):
+    """Save a dictionary to a compressed NPZ file, prompting for its location.
+
+    Arbitrary pickleable values are supported. Load the resulting file only
+    from trusted sources with ``np.load(filename, allow_pickle=True)``.
+    """
+    if not isinstance(data_dict, dict):
+        raise TypeError("data_dict must be a dictionary.")
+
+    if output_filename is None:
+        output_filename = _save_file_dialog("Save dictionary as NPZ", NPZ_FILETYPES, ".npz")
+    output_filename = _require_selected_filename(output_filename, "save file")
+
+    output_path = Path(output_filename)
+    if output_path.suffix.lower() != ".npz":
+        output_path = output_path.with_suffix(".npz")
+
+    np.savez_compressed(output_path, data_dict=np.asarray(data_dict, dtype=object))
+    return str(output_path)
+
+
+def load_dict_npz(input_filename=None):
+    """Load a dictionary saved by :func:`save_dict_npz`.
+
+    Only load files from trusted sources because this function enables NumPy
+    pickle support to restore arbitrary dictionary values.
+    """
+    if input_filename is None:
+        input_filename = _open_file_dialog("Load dictionary NPZ", NPZ_FILETYPES)
+    input_filename = _require_selected_filename(input_filename, "results file")
+
+    with np.load(input_filename, allow_pickle=True) as data:
+        if "data_dict" not in data:
+            raise ValueError("The NPZ file was not created by save_dict_npz().")
+        data_dict = data["data_dict"].item()
+
+    if not isinstance(data_dict, dict):
+        raise ValueError("The saved data_dict entry is not a dictionary.")
+    return data_dict
+
+
 # =============================================================================
 # TIMETAG FORMAT AND STREAMING HELPERS
 # =============================================================================
@@ -3080,4 +3121,22 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    # import matplotlib.pyplot as plt
+    # import numpy as np
+    # from qcs_analyzer._implementation import _g2calib_2, _g2calib_1, _g2calib_2_Hfunc
+    # x = np.linspace(-10000, 10000, 10000)
+    # y = _g2calib_2(
+    #     x,
+    #     height=1.0,
+    #     center=0.0,
+    #     # sigma=1000.0,
+    #     sigma=0.0,
+    #     offset=0.0,
+    # )
+    # plt.plot(x, y)
+    # plt.xlabel("Delay (ps)")
+    # plt.ylabel(r"$g^{(2)}$")
+    # plt.grid(True)
+    # plt.show()
+
     raise SystemExit(main())

@@ -5,6 +5,8 @@ from ._implementation import (
     load_time_dependent_results,
     save_g2_results,
     save_time_dependent_results,
+    load_dict_npz,
+    save_dict_npz,
 )
 
 __all__ = [
@@ -12,4 +14,6 @@ __all__ = [
     "load_time_dependent_results",
     "save_g2_results",
     "save_time_dependent_results",
+    "load_dict_npz"
+    "save_dict_npz"
 ]

@@ -14,13 +14,14 @@ For new code, import from the focused ``qcs_analyzer`` modules instead:
 #     from QCS_delay_estimator_v4 import *
 # Private helpers (names beginning with _) intentionally remain internal.
 import sys
+import numpy as np
 from qcs_analyzer import *
 from qcs_analyzer import __all__ as _QCS_ANALYZER_PUBLIC_API
 from qcs_analyzer.analysis import g2_process_time_dependent, timetag_correction, timetag_channel_time_difference
 from qcs_analyzer.io import load_timetag
-from qcs_analyzer.results import save_time_dependent_results
+from qcs_analyzer.results import save_time_dependent_results, save_dict_npz, load_dict_npz
 from qcs_analyzer.qcs_kernal import qcs_kernal
-from qcs_analyzer.allan_deviation import allan_deviation_estimator
+from qcs_analyzer.allan_deviation import allan_deviation_estimator, allan_deviation_estimator_tau_input
 
 __all__ = _QCS_ANALYZER_PUBLIC_API
 
@@ -29,25 +30,7 @@ if __name__ == "__main__":
     # load_time_dependent_results()
     # timetag_to_h5()
     # timetag_to_h5_fast()
-    # trancate_timetag(30)
-
-    # import matplotlib.pyplot as plt
-    # import numpy as np
-    # from qcs_analyzer._implementation import _g2calib_2, _g2calib_1, _g2calib_2_Hfunc
-    # x = np.linspace(-10000, 10000, 10000)
-    # y = _g2calib_2(
-    #     x,
-    #     height=1.0,
-    #     center=0.0,
-    #     # sigma=1000.0,
-    #     sigma=0.0,
-    #     offset=0.0,
-    # )
-    # plt.plot(x, y)
-    # plt.xlabel("Delay (ps)")
-    # plt.ylabel(r"$g^{(2)}$")
-    # plt.grid(True)
-    # plt.show()
+    # trancate_timetag(150)
 
     # results = load_g2_results()
     # fit = fit_g2(
@@ -68,7 +51,14 @@ if __name__ == "__main__":
 
     t_ps, ch, filename = load_timetag(return_filename=True)
 
-    # allan_deviation_estimator(t_ps, ch, number_of_tau_points=100)
+    # adev_result = allan_deviation_estimator(t_ps, ch, number_of_tau_points=200)
+    # save_dict_npz(adev_result)
+
+    # qcs_result = load_dict_npz()
+    # adev_result = allan_deviation_estimator_tau_input(qcs_result["tau_ref"], qcs_result["center"], number_of_tau_points=200)
+    # # save_dict_npz(adev_result)
+    # adev_result = allan_deviation_estimator_tau_input(qcs_result["tau"], qcs_result["center"], number_of_tau_points=200)
+    # # save_dict_npz(adev_result)
     # sys.exit()
 
     t_ps, ch, details = timetag_correction(
@@ -76,25 +66,27 @@ if __name__ == "__main__":
         ch_qutag=2,
         ch_hh=7,
         return_parameters=True,
-        correction_mode="global"
-        # correction_mode="per_trigger"
+        correction_mode="global",
+        # correction_mode="per_trigger",
     )
 
     Ta_s = 0.02
-    qcs_kernal(
+    qcs_result = qcs_kernal(
         t_ps,
         ch,
 
         Ta_s_init=Ta_s,
 
         fit_curve="g2calib_2",
-        time_bin_ps_init=100,
+        time_bin_ps_init=200,
         # Ta_s_max=0.5,
         Ta_s_max=Ta_s,
+        tau_span_ps_init=80e3,
 
-        Ta_ref_s=0.1
+        Ta_ref_s=0.1,
         # show_fit=True,
     )
+    save_dict_npz(qcs_result)
 
     # difference_ps, t_a, t_b, figure, axis = timetag_channel_time_difference(
     #     t_ps, ch,
