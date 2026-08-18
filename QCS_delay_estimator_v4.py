@@ -29,8 +29,9 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 if __name__ == "__main__":
     # load_time_dependent_results()
     # timetag_to_h5()
+    # timetag_to_h5_qutag(skip=100)
     # timetag_to_h5_fast()
-    # trancate_timetag(150)
+    # trancate_timetag(30)
 
     # results = load_g2_results()
     # fit = fit_g2(
@@ -51,7 +52,7 @@ if __name__ == "__main__":
 
     t_ps, ch, filename = load_timetag(return_filename=True)
 
-    # adev_result = allan_deviation_estimator(t_ps, ch, number_of_tau_points=200)
+    # adev_result = allan_deviation_estimator(t_ps, ch, number_of_tau_points=500, ch_clk_0=3, ch_clk_1=4)
     # save_dict_npz(adev_result)
 
     # qcs_result = load_dict_npz()
@@ -63,25 +64,26 @@ if __name__ == "__main__":
 
     t_ps, ch, details = timetag_correction(
         t_ps, ch,
-        ch_qutag=2,
+        ch_qutag=3,
         ch_hh=7,
         return_parameters=True,
         correction_mode="global",
         # correction_mode="per_trigger",
     )
 
-    Ta_s = 0.02
+    Ta_s = 0.2
     qcs_result = qcs_kernal(
         t_ps,
         ch,
 
         Ta_s_init=Ta_s,
+        tau_ps_init=115535,
 
         fit_curve="g2calib_2",
         time_bin_ps_init=200,
         # Ta_s_max=0.5,
         Ta_s_max=Ta_s,
-        tau_span_ps_init=80e3,
+        # tau_span_ps_init=120e3,
 
         Ta_ref_s=0.1,
         # show_fit=True,
@@ -90,25 +92,27 @@ if __name__ == "__main__":
 
     # difference_ps, t_a, t_b, figure, axis = timetag_channel_time_difference(
     #     t_ps, ch,
-    #     ch_a=7,
-    #     ch_b=2,
+    #     # ch_a=3,
+    #     ch_a=3,
+    #     # ch_b=4,
+    #     ch_b=7,
     #     bin_s=0.1,
     #     # show=False,
     # )
 
-    sys.exit()
+    # sys.exit()
 
     # results = g2_process(
     #     t_ps,
     #     ch,
-    #     # t_center=4.4,
-    #     t_center=24601.2,
-    #     t_stop=0.1,
-    #     t_span=2000,
-    #     # time_bin=0.02,
-    #     time_bin=2,
+    #     t_center=56.793,
+    #     # t_center=24601.2,
+    #     t_stop=0.5,
+    #     t_span=200,
+    #     time_bin=0.02,
+    #     # time_bin=2,
     #     sig_half=5.0,
-    #     freq=100e6,
+    #     freq=75e6,
     #     chA=1,
     #     chB=6,
     #     filename=filename,
@@ -116,40 +120,40 @@ if __name__ == "__main__":
     # g2_plot(results=results)
     # save_g2_results(results)
 
-    time_dependent_results = g2_process_time_dependent(
-        t_ps,
-        ch,
-        t_stop_start=0.1,
-        t_stop_stop=3600,
-        t_stop_step=0.1,
-        # fit_curve="expogaussconv",
-        fit_curve="g2calib_1",
-        fit_parameters={
-            "height": 40 / 0.1,
-            # "gamma": 0.7,
-            "sigma": 0.2,
-            "offset": 0.01,
-        },
-        # t_center=4.4,
-        t_center=24601.8,
-        t_span=80,
-        # time_bin=0.05,
-        time_bin=0.5,
-        sig_half=5.0,
-        fit_window=50.0,
-        adaptive_t_center=True,
-        display_values=(
-            "center",
-            "fwhm",
-            # "center_uncertainty",
-            # "fwhm_uncertainty",
-            "coincidences",
-        ),
-        freq=100e6,
-        chA=1,
-        chB=6,
-        # show_fit=True,
-    )
-    save_time_dependent_results(time_dependent_results)
+    # time_dependent_results = g2_process_time_dependent(
+    #     t_ps,
+    #     ch,
+    #     t_stop_start=0.1,
+    #     t_stop_stop=3600,
+    #     t_stop_step=0.1,
+    #     # fit_curve="expogaussconv",
+    #     fit_curve="g2calib_1",
+    #     fit_parameters={
+    #         "height": 40 / 0.1,
+    #         # "gamma": 0.7,
+    #         "sigma": 0.2,
+    #         "offset": 0.01,
+    #     },
+    #     # t_center=4.4,
+    #     t_center=24601.8,
+    #     t_span=80,
+    #     # time_bin=0.05,
+    #     time_bin=0.5,
+    #     sig_half=5.0,
+    #     fit_window=50.0,
+    #     adaptive_t_center=True,
+    #     display_values=(
+    #         "center",
+    #         "fwhm",
+    #         # "center_uncertainty",
+    #         # "fwhm_uncertainty",
+    #         "coincidences",
+    #     ),
+    #     freq=100e6,
+    #     chA=1,
+    #     chB=6,
+    #     # show_fit=True,
+    # )
+    # save_time_dependent_results(time_dependent_results)
 
     # load_time_dependent_results()

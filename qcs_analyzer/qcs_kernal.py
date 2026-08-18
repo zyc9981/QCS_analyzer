@@ -41,7 +41,7 @@ def qcs_kernal(
     ch,
     ch_0=1,
     ch_1=6,
-    ch_ref_0=2,
+    ch_ref_0=3,
     ch_ref_1=7,
 
     tau_ps_init=24601.8e3,
@@ -220,7 +220,7 @@ def qcs_kernal(
         time_bin_ps = state["time_bin_ps"]
         edges = np.arange(t_lo, t_hi + time_bin_ps, time_bin_ps)
 
-        print(t_lo, t_lo-t_hi, time_bin_ps, state["tau_span_ps"])
+        # print(t_lo, t_lo-t_hi, time_bin_ps, state["tau_span_ps"])
         if len(edges) < 2:
             raise ValueError("Window too small for given bin width. Increase span or decrease bin.")
     

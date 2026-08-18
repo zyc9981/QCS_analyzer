@@ -37,7 +37,8 @@ except ImportError:
 # Keep the current acquisition folder in one place.  All file dialogs below
 # use this value, so it is the only default path that needs updating.
 DEFAULT_FILE_DIALOG_DIRECTORY = Path(
-    r"C:\Yichi Zhang\GHZ_QN\WDM_GHZ_Tx5\20260803_2timetaggers_test2"
+    # r"C:\Yichi Zhang\GHZ_QN\WDM_GHZ_Tx5\20260803_2timetaggers_test2"
+    r"C:\Yichi Zhang\QCS\20260816_OCXO_ADEV_test"
 )
 
 TIMETAG_SOURCE_FILETYPES = [
@@ -510,7 +511,7 @@ def timetag_to_h5(
     allow_trailing_partial_binary_record=True,
     hydraharp_filename=None,
     hydraharp_channel_offset=5,
-    ch_trig_qutag=2,
+    ch_trig_qutag=3,
     ch_trig_hh=7,
     sort_by_timestamp=True,
 ):
@@ -707,6 +708,149 @@ def timetag_to_h5(
     print(f"Saved H5 file: {output_filename}")
     print(f"Rows saved: {n_total}")
     return output_filename
+
+
+def timetag_to_h5_qutag(
+    filename=None,
+    header_lines=1,
+    delimiter=",",
+    output_filename=None,
+    chunk_size=1_000_000,
+    compression="gzip",
+    progress_every=1_000_000,
+    source_format="auto",
+    binary_header_bytes=QUTAG_BINARY_HEADER_BYTES,
+    allow_trailing_partial_binary_record=True,
+    skip=10,
+    sort_by_timestamp=True,
+):
+    """Convert QuTAG timetags to QCS-layout H5 with per-channel thinning.
+
+    ``skip`` retains the first event and every ``skip``-th event thereafter
+    for each channel independently.  For example, ``skip=10`` retains one
+    event for every ten events on each channel.
+    """
+    if filename is None:
+        filename = _open_file_dialog("Select timetag file", TIMETAG_SOURCE_FILETYPES)
+    filename = _require_selected_filename(filename, "timetag file")
+    if isinstance(skip, bool) or not isinstance(skip, (int, np.integer)) or skip < 1:
+        raise ValueError("skip must be a positive integer.")
+    skip = int(skip)
+
+    if output_filename is None:
+        output_filename = str(Path(filename).with_suffix(".h5"))
+
+    source_format = _normalize_timetag_source_format(filename, source_format)
+    if source_format == "binary":
+        total_items = _estimate_qutag_binary_record_count(
+            filename,
+            header_bytes=binary_header_bytes,
+            allow_trailing_partial_record=allow_trailing_partial_binary_record,
+        )
+        total_label = "records"
+        t_dtype = np.int64
+        def make_qutag_chunks():
+            return _iter_qutag_binary_chunks(
+                filename,
+                chunk_size=chunk_size,
+                header_bytes=binary_header_bytes,
+                allow_trailing_partial_record=allow_trailing_partial_binary_record,
+                total_records=total_items,
+            )
+    else:
+        total_items = _estimate_fixed_width_line_count(filename)
+        total_label = "lines"
+        t_dtype = np.float64
+        def make_qutag_chunks():
+            return _iter_timetag_chunks(
+                filename,
+                header_lines=header_lines,
+                delimiter=delimiter,
+                chunk_size=chunk_size,
+            )
+
+    print(f"Input format: {source_format}")
+    print(f"Estimated total {total_label}: {total_items:,}")
+    ch_info = np.iinfo(np.uint8)
+
+    channel_record_counts = np.zeros(ch_info.max + 1, dtype=np.int64)
+    n_input = 0
+    n_total = 0
+    next_progress = progress_every
+
+    with h5py.File(output_filename, "w") as h5:
+        h5.attrs["source_format"] = source_format
+        h5.attrs["timestamp_unit"] = "ps"
+        h5.attrs["channel_dtype"] = "uint8"
+        h5.attrs["qutag_source_filename"] = str(Path(filename))
+        h5.attrs["channel_record_skip"] = skip
+        if source_format == "binary":
+            h5.attrs["qutag_binary_header_bytes"] = int(binary_header_bytes)
+
+        t_ds = h5.create_dataset(
+            "t_ps",
+            shape=(0,),
+            maxshape=(None,),
+            dtype=t_dtype,
+            chunks=(min(chunk_size, 1_000_000),),
+            compression=compression,
+        )
+        ch_ds = h5.create_dataset(
+            "ch",
+            shape=(0,),
+            maxshape=(None,),
+            dtype=np.uint8,
+            chunks=(min(chunk_size, 1_000_000),),
+            compression=compression,
+        )
+
+        for t_chunk, ch_chunk in make_qutag_chunks():
+            n_input += len(t_chunk)
+            if len(t_chunk) and (ch_chunk.min() < ch_info.min or ch_chunk.max() > ch_info.max):
+                raise ValueError(
+                    f"Channel values {ch_chunk.min()}..{ch_chunk.max()} do not fit in "
+                    "uint8."
+                )
+            ch_chunk = ch_chunk.astype(np.uint8, copy=False)
+
+            retained_event_mask = np.zeros(len(ch_chunk), dtype=bool)
+            for channel in np.unique(ch_chunk):
+                channel_indices = np.flatnonzero(ch_chunk == channel)
+                first_retained_index = (-channel_record_counts[channel]) % skip
+                retained_event_mask[channel_indices[first_retained_index::skip]] = True
+                channel_record_counts[channel] += len(channel_indices)
+
+            t_chunk = t_chunk[retained_event_mask]
+            ch_chunk = ch_chunk[retained_event_mask]
+            n_new = len(t_chunk)
+            t_ds.resize(n_total + n_new, axis=0)
+            ch_ds.resize(n_total + n_new, axis=0)
+            t_ds[n_total : n_total + n_new] = t_chunk
+            ch_ds[n_total : n_total + n_new] = ch_chunk
+            n_total += n_new
+
+            processed_items = n_input
+            while progress_every and processed_items >= next_progress:
+                print(
+                    f"Processed input records {next_progress:,}/{total_items:,}"
+                )
+                next_progress += progress_every
+
+        if sort_by_timestamp:
+            was_reordered = _sort_h5_timetags(t_ds, ch_ds)
+            h5.attrs["timestamps_sorted"] = True
+            h5.attrs["timestamp_sort_order"] = "stable ascending t_ps"
+            if was_reordered:
+                print("Sorted QuTAG t_ps and applied the same order to ch.")
+
+    if n_total == 0:
+        raise ValueError("File parse returned empty data. Check input format and file contents.")
+
+    print(f"Processed input records: {n_input:,}/{total_items:,}")
+    print(f"Saved H5 file: {output_filename}")
+    print(f"Rows saved: {n_total}")
+    return output_filename
+
 
 
 def timetag_to_h5_fast(

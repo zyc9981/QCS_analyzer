@@ -76,6 +76,7 @@ def allan_deviation_estimator(
     axis.set_xlabel(r"Averaging time $\tau$ (s)")
     axis.set_ylabel("Allan deviation")
     axis.grid(True, which="both")
+    axis.set_ylim(bottom=5e-12)
     fig.tight_layout()
     plt.show()
 
