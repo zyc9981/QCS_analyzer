@@ -41,7 +41,7 @@ def qcs_kernal(
     ch,
     ch_0=1,
     ch_1=6,
-    ch_ref_0=3,
+    ch_ref_0=2,
     ch_ref_1=7,
 
     tau_ps_init=24601.8e3,
@@ -345,34 +345,46 @@ def qcs_kernal(
     # After scan: plot results
     # ------------------------------------------------------------
 
+    start_index = 6
+    record_slice = slice(min(start_index, acquisition_index), acquisition_index)
+    point_records = point_records[record_slice]
+    tau_ps_records = tau_ps_records[record_slice]
+    tau_ref_ps_records = tau_ref_ps_records[record_slice]
+    tau_ref_uncertainty_ps_records = tau_ref_uncertainty_ps_records[record_slice]
+    Ta_s_records = Ta_s_records[record_slice]
+    fwhm_records = fwhm_records[record_slice]
+    sigma_records = sigma_records[record_slice]
+    tau_s_uncertainty_records = tau_s_uncertainty_records[record_slice]
+    CC_count_records = CC_count_records[record_slice]
+    coincidence_records = coincidence_records[record_slice]
+    acquisition_index = len(point_records)
+
     # Fig1: details
     fig1, axes = plt.subplots(5, 1, sharex=True, squeeze=False)
     axes = axes[:, 0]
 
     ax1 = axes[0]
-    ax1.plot(point_records[:acquisition_index] * 1e-12, tau_ps_records[:acquisition_index] - tau_ps_records[0], "o-")
+    ax1.plot(point_records * 1e-12, tau_ps_records - tau_ps_records[0], "o-")
     ax1.set_ylabel(r"$\tau$ (ps)")
     ax1.grid(True)
 
     ax2 = axes[1]
-    ax2.plot(point_records[:acquisition_index] * 1e-12, Ta_s_records[:acquisition_index], "o-")
+    ax2.plot(point_records * 1e-12, Ta_s_records, "o-")
     ax2.set_ylabel(r"$T_a$ (s)")
     ax2.grid(True)
 
     ax3 = axes[2]
-    # ax3.plot(point_records[:acquisition_index] * 1e-12, fwhm_records[:acquisition_index], "o-")
-    # ax3.set_ylabel(r"FWHM (ps)")
-    ax3.plot(point_records[:acquisition_index] * 1e-12, sigma_records[:acquisition_index], "o-")
+    ax3.plot(point_records * 1e-12, sigma_records, "o-")
     ax3.set_ylabel(r"$\sigma$ (ps)")
     ax3.grid(True)
 
     ax4 = axes[3]
-    ax4.plot(point_records[:acquisition_index] * 1e-12, CC_count_records[:acquisition_index], "o-")
+    ax4.plot(point_records * 1e-12, CC_count_records, "o-")
     ax4.set_ylabel(r"CC")
     ax4.grid(True)
 
     ax5 = axes[4]
-    ax5.plot(point_records[:acquisition_index] * 1e-12, tau_ref_ps_records[:acquisition_index] - tau_ref_ps_records[0], "o-")
+    ax5.plot(point_records * 1e-12, tau_ref_ps_records - tau_ref_ps_records[0], "o-")
     ax5.set_ylabel(r"$\tau_{ref}$ (ps)")
     ax5.grid(True)
 
@@ -395,14 +407,14 @@ def qcs_kernal(
     fig2, axes = plt.subplots(2, 1, sharex=True, squeeze=False)
     axes = axes[:, 0]
 
-    tau_diff = tau_ps_records[:acquisition_index] - tau_ref_ps_records[:acquisition_index]
+    tau_diff = tau_ps_records - tau_ref_ps_records
     ax1 = axes[0]
-    ax1.plot(point_records[:acquisition_index] * 1e-12, tau_diff - np.mean(tau_diff), "o-")
+    ax1.plot(point_records * 1e-12, tau_diff - np.mean(tau_diff), "o-")
     ax1.set_ylabel(r"$\tau$ (ps)")
     ax1.grid(True)
 
     ax2 = axes[1]
-    ax2.plot(point_records[:acquisition_index] * 1e-12, CC_count_records[:acquisition_index], "o-")
+    ax2.plot(point_records * 1e-12, CC_count_records, "o-")
     ax2.set_ylabel(r"CC")
     ax2.grid(True)
 

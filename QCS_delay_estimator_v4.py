@@ -76,6 +76,8 @@ if __name__ == "__main__":
         t_ps,
         ch,
 
+        ch_ref_0=3,
+
         Ta_s_init=Ta_s,
         tau_ps_init=115535,
 
@@ -89,6 +91,16 @@ if __name__ == "__main__":
         # show_fit=True,
     )
     save_dict_npz(qcs_result)
+    # import matplotlib.pyplot as plt
+    # import numpy as np
+    # qcs_results = load_dict_npz()
+    # fig, axes = plt.subplots(2, 1, sharex=True, squeeze=False)
+    # axes = axes[:, 0]
+
+    # ax1 = axes[0]
+    # ax1.plot(qcs_results[]point_records[:acquisition_index] * 1e-12, tau_diff - np.mean(tau_diff), "o-")
+    # ax1.set_ylabel(r"$\tau$ (ps)")
+    # ax1.grid(True)
 
     # difference_ps, t_a, t_b, figure, axis = timetag_channel_time_difference(
     #     t_ps, ch,
