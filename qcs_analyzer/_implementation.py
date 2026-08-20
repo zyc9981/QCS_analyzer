@@ -38,7 +38,8 @@ except ImportError:
 # use this value, so it is the only default path that needs updating.
 DEFAULT_FILE_DIALOG_DIRECTORY = Path(
     # r"C:\Yichi Zhang\GHZ_QN\WDM_GHZ_Tx5\20260803_2timetaggers_test2"
-    r"C:\Yichi Zhang\QCS\20260816_OCXO_ADEV_test"
+    # r"C:\Yichi Zhang\QCS\20260816_OCXO_ADEV_test"
+    r"C:\Yichi Zhang\QCS\20260818_TwoWay_2tagger_test"
 )
 
 TIMETAG_SOURCE_FILETYPES = [

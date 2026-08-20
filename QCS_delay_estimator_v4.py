@@ -31,7 +31,7 @@ if __name__ == "__main__":
     # timetag_to_h5()
     # timetag_to_h5_qutag(skip=100)
     # timetag_to_h5_fast()
-    # trancate_timetag(30)
+    # trancate_timetag(1800)
 
     # results = load_g2_results()
     # fit = fit_g2(
@@ -71,7 +71,7 @@ if __name__ == "__main__":
         # correction_mode="per_trigger",
     )
 
-    Ta_s = 0.2
+    Ta_s = 0.1
     qcs_result = qcs_kernal(
         t_ps,
         ch,
@@ -86,7 +86,9 @@ if __name__ == "__main__":
         # tau_span_ps_init=120e3,
 
         Ta_ref_s=0.1,
-        # show_fit=True,
+        show_fit=True,
+
+        Freq = 50e6,
     )
     save_dict_npz(qcs_result)
 
@@ -100,7 +102,7 @@ if __name__ == "__main__":
     #     # show=False,
     # )
 
-    # sys.exit()
+    sys.exit()
 
     # results = g2_process(
     #     t_ps,
