@@ -71,7 +71,7 @@ if __name__ == "__main__":
         # correction_mode="per_trigger",
     )
 
-    Ta_s = 0.1
+    Ta_s = 0.5
     qcs_result = qcs_kernal(
         t_ps,
         ch,
