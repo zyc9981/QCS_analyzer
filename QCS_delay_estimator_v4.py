@@ -50,7 +50,7 @@ if __name__ == "__main__":
     # )
     # print(f"sigma: {fit["parameters"]["sigma"]:.8g}", f"gamma: {fit["parameters"]["gamma"]:.8g}")
 
-    t_ps, ch, filename = load_timetag(return_filename=True)
+    # t_ps, ch, filename = load_timetag(return_filename=True)
 
     # adev_result = allan_deviation_estimator(t_ps, ch, number_of_tau_points=500, ch_clk_0=3, ch_clk_1=4)
     # save_dict_npz(adev_result)
@@ -62,35 +62,59 @@ if __name__ == "__main__":
     # # save_dict_npz(adev_result)
     # sys.exit()
 
-    t_ps, ch, details = timetag_correction(
-        t_ps, ch,
-        ch_qutag=3,
-        ch_hh=7,
-        return_parameters=True,
-        correction_mode="global",
-        # correction_mode="per_trigger",
-    )
+    # t_ps, ch, details = timetag_correction(
+    #     t_ps, ch,
+    #     ch_qutag=3,
+    #     ch_hh=7,
+    #     return_parameters=True,
+    #     correction_mode="global",
+    #     # correction_mode="per_trigger",
+    # )
 
-    Ta_s = 0.5
-    qcs_result = qcs_kernal(
-        t_ps,
-        ch,
+    # Ta_s = 0.5
+    # qcs_result = qcs_kernal(
+    #     t_ps,
+    #     ch,
 
-        Ta_s_init=Ta_s,
-        tau_ps_init=115535,
+    #     Ta_s_init=Ta_s,
+    #     tau_ps_init=115535,
 
-        fit_curve="g2calib_2",
-        time_bin_ps_init=200,
-        # Ta_s_max=0.5,
-        Ta_s_max=Ta_s,
-        # tau_span_ps_init=120e3,
+    #     fit_curve="g2calib_2",
+    #     time_bin_ps_init=200,
+    #     # Ta_s_max=0.5,
+    #     Ta_s_max=Ta_s,
+    #     # tau_span_ps_init=120e3,
 
-        Ta_ref_s=0.1,
-        show_fit=True,
+    #     Ta_ref_s=0.1,
+    #     show_fit=True,
 
-        Freq = 50e6,
-    )
-    save_dict_npz(qcs_result)
+    #     Freq = 50e6,
+    # )
+    # save_dict_npz(qcs_result)
+
+    import matplotlib.pyplot as plt
+    import numpy as np
+    qcs_results = load_dict_npz()
+    fig1, axes = plt.subplots(3, 1, sharex=True, squeeze=False)
+    axes = axes[:, 0]
+    ax1 = axes[0]
+    tau = qcs_results["tau"]
+    ax1.plot(qcs_results["center"] * 1e-12, tau - tau[0], "-", linewidth=2.0)
+    ax1.set_ylabel(r"$\tau$ (ps)")
+    ax1.grid(True)
+    ax2 = axes[1]
+    tau_ref = qcs_results["tau_ref"]
+    ax2.plot(qcs_results["center"] * 1e-12, tau_ref - tau_ref[0], "-", linewidth=2.0)
+    ax2.set_ylabel(r"$\tau$ (ps)")
+    ax2.grid(True)
+    ax3 = axes[2]
+    tau_diff = qcs_results["tau_diff"]
+    ax3.plot(qcs_results["center"] * 1e-12, tau_diff - np.mean(tau_diff), "-", linewidth=2.0)
+    ax3.set_ylabel(r"$\tau$ (ps)")
+    ax3.grid(True)
+    axes[-1].set_xlabel("Record Points (s)")
+    fig1.tight_layout()
+    plt.show()
 
     # difference_ps, t_a, t_b, figure, axis = timetag_channel_time_difference(
     #     t_ps, ch,
