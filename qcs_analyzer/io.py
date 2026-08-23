@@ -3,6 +3,7 @@
 from ._implementation import (
     load_timetag,
     timetag_to_h5,
+    timetag_to_h5_qutagHH,
     timetag_to_h5_qutag,
     timetag_to_h5_fast,
     trancate_timetag,
@@ -12,6 +13,7 @@ from ._implementation import (
 __all__ = [
     "load_timetag",
     "timetag_to_h5",
+    "timetag_to_h5_qutagHH",
     "timetag_to_h5_qutag",
     "timetag_to_h5_fast",
     "trancate_timetag",

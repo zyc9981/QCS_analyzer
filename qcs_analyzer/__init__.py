@@ -30,6 +30,7 @@ from .config import (
 from .io import (
     load_timetag,
     timetag_to_h5,
+    timetag_to_h5_qutagHH,
     timetag_to_h5_qutag,
     timetag_to_h5_fast,
     trancate_timetag,
@@ -70,6 +71,7 @@ __all__ = [
     "timetag_channel_time_difference",
     "timetag_correction",
     "timetag_to_h5",
+    "timetag_to_h5_qutagHH",
     "timetag_to_h5_qutag",
     "timetag_to_h5_fast",
     "trancate_timetag",

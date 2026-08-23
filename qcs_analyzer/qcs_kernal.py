@@ -36,6 +36,33 @@ def qcs_ref_estimator(
     return tau_at_point, np.std(tau - np.polyval(fit, t)), N_sample
 
 
+# def qcs_ref_estimator2(
+#     tau,
+#     t,
+#     N_sample=None,
+#     t_eval_ps=None,
+# ):
+#     """Return residual standard deviation and fitted tau at the time-span center."""
+#     if N_sample != None:
+#         N_sample = int(np.min([np.size(tau), N_sample]))
+#     else:
+#         N_sample = np.size(tau)
+#     if N_sample < 2:
+#         raise ValueError("tau and t must contain at least two samples for a linear fit.")
+
+#     tau = np.asarray(tau).ravel()[:N_sample]
+#     t = np.asarray(t).ravel()[:N_sample]
+#     fit = np.polyfit(t, tau, 1)
+#     # t_center = (t[0] + t[-1]) / 2
+#     # tau_center = np.polyval(fit, t_center)
+
+#     if t_eval_ps == None:
+#         t_eval_ps = (t[0] + t[-1]) / 2
+#     tau_at_point = np.polyval(fit, t_eval_ps)
+
+#     return tau_at_point, np.std(tau - np.polyval(fit, t)), N_sample
+
+
 def qcs_kernal(
     t_ps,
     ch,

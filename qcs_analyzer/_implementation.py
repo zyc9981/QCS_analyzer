@@ -27,6 +27,14 @@ try:
 except ImportError:
     curve_fit = None
 
+try:
+    from Swabian import TimeTagger
+except ImportError:
+    try:
+        import TimeTagger
+    except ImportError:
+        TimeTagger = None
+
 
 # =============================================================================
 # FILE-DIALOG CONFIGURATION
@@ -39,13 +47,18 @@ except ImportError:
 DEFAULT_FILE_DIALOG_DIRECTORY = Path(
     # r"C:\Yichi Zhang\GHZ_QN\WDM_GHZ_Tx5\20260803_2timetaggers_test2"
     # r"C:\Yichi Zhang\QCS\20260816_OCXO_ADEV_test"
-    r"C:\Yichi Zhang\QCS\20260818_TwoWay_2tagger_test"
+    # r"C:\Yichi Zhang\QCS\20260818_TwoWay_2tagger_test"
+    r"C:\Yichi Zhang\QCS\20260821_TwoWay_2tagger_TTXandHH"
 )
 
 TIMETAG_SOURCE_FILETYPES = [
     ("Timetag files", "*.txt *.csv *.bin"),
     ("Binary timetag files", "*.bin"),
     ("Text/CSV files", "*.txt *.csv"),
+    ("All files", "*.*"),
+]
+TIMETAGGER_TTBIN_FILETYPES = [
+    ("Time Tagger files", "*.ttbin"),
     ("All files", "*.*"),
 ]
 TIMETAG_ARRAY_FILETYPES = [
@@ -326,6 +339,45 @@ def _iter_qutag_binary_chunks(
             remaining -= len(records)
 
 
+def _iter_timetagger_ttbin_chunks(filename, chunk_size=1_000_000):
+    """Yield timestamp/channel chunks from a Time Tagger X FileWriter stream."""
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive.")
+    if TimeTagger is None:
+        raise ImportError(
+            "The Swabian Time Tagger Python package is required to read .ttbin files."
+        )
+
+    try:
+        reader = TimeTagger.FileReader(str(filename))
+    except Exception as exc:
+        raise ValueError(
+            "Could not open the Time Tagger X .ttbin stream. Select the "
+            "FileWriter sequence header (for example, 'measurement.ttbin') "
+            "after recording has been stopped."
+        ) from exc
+
+    while reader.hasData():
+        buffer = reader.getData(int(chunk_size))
+        timestamps = np.asarray(buffer.getTimestamps(), dtype=np.int64)
+        channels = np.asarray(buffer.getChannels(), dtype=np.int64)
+        if len(timestamps) != len(channels):
+            raise ValueError("Time Tagger X FileReader returned mismatched timestamps and channels.")
+        if len(timestamps):
+            yield timestamps, channels
+
+
+def _timetagger_sequence_header_filename(filename):
+    """Prefer a FileWriter sequence header when a numbered block was selected."""
+    path = Path(filename)
+    parts = path.stem.rsplit(".", 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        header_path = path.with_name(f"{parts[0]}{path.suffix}")
+        if header_path.is_file():
+            return header_path
+    return path
+
+
 def _matching_hydraharp_h5_filename(filename):
     """Return the HH H5 name produced alongside a QuTAG timestamp file."""
     source_path = Path(filename)
@@ -494,12 +546,12 @@ def _sort_h5_timetags(t_dataset, ch_dataset):
 
 
 # =============================================================================
-# QUTAG + HYDRAHARP FILE CONVERSION
+# TIME TAGGER X / QUTAG + HYDRAHARP FILE CONVERSION
 # =============================================================================
-# timetag_to_h5() is chunked and memory-efficient.
-# timetag_to_h5_fast() is faster for files that fit comfortably in RAM.
+# timetag_to_h5_qutagHH() and timetag_to_h5() are chunked and memory-efficient.
+# timetag_to_h5_fast() remains the legacy QuTAG in-memory converter.
 
-def timetag_to_h5(
+def timetag_to_h5_qutagHH(
     filename=None,
     header_lines=1,
     delimiter=",",
@@ -711,6 +763,195 @@ def timetag_to_h5(
     return output_filename
 
 
+def timetag_to_h5(
+    filename=None,
+    output_filename=None,
+    chunk_size=1_000_000,
+    compression="gzip",
+    progress_every=1_000_000,
+    hydraharp_filename=None,
+    hydraharp_channel_offset=5,
+    ch_trig_time_tagger=3,
+    ch_trig_hh=7,
+    sort_by_timestamp=True,
+):
+    """Merge a Time Tagger X ``.ttbin`` stream with its HydraHarp H5 stream.
+
+    Pass the FileWriter sequence header (``filename.ttbin``), not one of its
+    numbered data blocks. The FileReader then includes ``filename.1.ttbin``,
+    ``filename.2.ttbin``, and any later blocks automatically. The output H5
+    retains the established ``t_ps`` (int64, ps) and ``ch`` (uint8) layout.
+    """
+    if filename is None:
+        filename = _open_file_dialog(
+            "Select Time Tagger X .ttbin file", TIMETAGGER_TTBIN_FILETYPES
+        )
+    filename = _require_selected_filename(filename, "Time Tagger X .ttbin file")
+
+    selected_time_tagger_path = Path(filename)
+    if selected_time_tagger_path.suffix.lower() != ".ttbin":
+        raise ValueError("Time Tagger X input must be a FileWriter .ttbin file.")
+    time_tagger_path = _timetagger_sequence_header_filename(selected_time_tagger_path)
+    if not time_tagger_path.is_file():
+        raise FileNotFoundError(f"Time Tagger X .ttbin file was not found: {time_tagger_path}")
+    if time_tagger_path != selected_time_tagger_path:
+        print(f"Using FileWriter sequence header: {time_tagger_path}")
+
+    if output_filename is None:
+        output_filename = str(time_tagger_path.with_suffix(".h5"))
+
+    if hydraharp_filename is None:
+        hydraharp_filename = _matching_hydraharp_h5_filename(time_tagger_path)
+    hydraharp_path = Path(hydraharp_filename)
+    if not hydraharp_path.is_file():
+        raise FileNotFoundError(
+            "Matching HydraHarp H5 file was not found: "
+            f"{hydraharp_path}"
+        )
+
+    with h5py.File(hydraharp_path, "r") as hh_h5:
+        if "t_ps" not in hh_h5 or "ch" not in hh_h5:
+            raise ValueError(f"HydraHarp H5 is missing t_ps and/or ch: {hydraharp_path}")
+        if len(hh_h5["t_ps"]) != len(hh_h5["ch"]):
+            raise ValueError(f"HydraHarp H5 t_ps/ch lengths differ: {hydraharp_path}")
+        hydraharp_items = len(hh_h5["t_ps"])
+    if hydraharp_items == 0:
+        raise ValueError(f"HydraHarp H5 contains no timetag records: {hydraharp_path}")
+
+    print(f"Time Tagger X input: {time_tagger_path}")
+    print(f"HydraHarp records: {hydraharp_items:,} (channel offset +{hydraharp_channel_offset})")
+
+    time_tagger_trigger_timestamps = _channel_timestamps(
+        _iter_timetagger_ttbin_chunks(time_tagger_path, chunk_size=chunk_size),
+        ch_trig_time_tagger,
+        "Time Tagger X",
+    )
+    hydraharp_trigger_timestamps = _channel_timestamps(
+        _iter_h5_timetag_chunks(
+            hydraharp_path,
+            chunk_size=chunk_size,
+            channel_offset=hydraharp_channel_offset,
+        ),
+        ch_trig_hh,
+        "HydraHarp",
+    )
+
+    # Rebase each tagger to its own first trigger, making both triggers 0 ps.
+    time_tagger_initial_trigger_t_ps = time_tagger_trigger_timestamps[0]
+    hydraharp_initial_trigger_t_ps = hydraharp_trigger_timestamps[0]
+    time_tagger_time_offset_ps = -time_tagger_initial_trigger_t_ps
+    hydraharp_time_offset_ps = -hydraharp_initial_trigger_t_ps
+    print(
+        "Trigger alignment (first triggers rebased to zero): "
+        f"Time Tagger X ch {ch_trig_time_tagger} at {time_tagger_initial_trigger_t_ps} ps; "
+        f"HydraHarp ch {ch_trig_hh} at {hydraharp_initial_trigger_t_ps} ps; "
+        f"Time Tagger X offset {time_tagger_time_offset_ps} ps; "
+        f"HydraHarp offset {hydraharp_time_offset_ps} ps"
+    )
+
+    merged_chunks = _merge_sorted_timetag_chunks(
+        _offset_timetag_chunks(
+            _iter_timetagger_ttbin_chunks(time_tagger_path, chunk_size=chunk_size),
+            time_offset_ps=time_tagger_time_offset_ps,
+        ),
+        _offset_timetag_chunks(
+            _iter_h5_timetag_chunks(
+                hydraharp_path,
+                chunk_size=chunk_size,
+                channel_offset=hydraharp_channel_offset,
+            ),
+            time_offset_ps=hydraharp_time_offset_ps,
+        ),
+        chunk_size=chunk_size,
+    )
+    ch_info = np.iinfo(np.uint8)
+
+    n_total = 0
+    negative_timestamp_events_removed = 0
+    next_progress = progress_every
+
+    with h5py.File(output_filename, "w") as h5:
+        h5.attrs["source_format"] = "timetagger_x_ttbin_plus_hydraharp_h5"
+        h5.attrs["timestamp_unit"] = "ps"
+        h5.attrs["channel_dtype"] = "uint8"
+        h5.attrs["time_tagger_x_source_filename"] = str(time_tagger_path)
+        h5.attrs["hydraharp_source_filename"] = str(hydraharp_path)
+        h5.attrs["hydraharp_channel_offset"] = int(hydraharp_channel_offset)
+        h5.attrs["time_tagger_x_trigger_channel"] = int(ch_trig_time_tagger)
+        h5.attrs["hydraharp_trigger_channel"] = int(ch_trig_hh)
+        h5.attrs["time_tagger_x_trigger_event_count"] = len(time_tagger_trigger_timestamps)
+        h5.attrs["hydraharp_trigger_event_count"] = len(hydraharp_trigger_timestamps)
+        h5.attrs["time_tagger_x_first_observed_trigger_t_ps"] = time_tagger_trigger_timestamps[0]
+        h5.attrs["hydraharp_first_observed_trigger_t_ps"] = hydraharp_trigger_timestamps[0]
+        h5.attrs["time_tagger_x_initial_trigger_t_ps"] = time_tagger_initial_trigger_t_ps
+        h5.attrs["hydraharp_initial_trigger_t_ps"] = hydraharp_initial_trigger_t_ps
+        h5.attrs["alignment_reference"] = "each_tagger_first_trigger_at_zero"
+        h5.attrs["time_tagger_x_time_offset_ps"] = time_tagger_time_offset_ps
+        h5.attrs["hydraharp_time_offset_ps"] = hydraharp_time_offset_ps
+
+        t_ds = h5.create_dataset(
+            "t_ps",
+            shape=(0,),
+            maxshape=(None,),
+            dtype=np.int64,
+            chunks=(min(chunk_size, 1_000_000),),
+            compression=compression,
+        )
+        ch_ds = h5.create_dataset(
+            "ch",
+            shape=(0,),
+            maxshape=(None,),
+            dtype=np.uint8,
+            chunks=(min(chunk_size, 1_000_000),),
+            compression=compression,
+        )
+
+        for t_chunk, ch_chunk in merged_chunks:
+            nonnegative_mask = t_chunk >= 0
+            if not np.all(nonnegative_mask):
+                negative_timestamp_events_removed += int(
+                    len(t_chunk) - np.count_nonzero(nonnegative_mask)
+                )
+                t_chunk = t_chunk[nonnegative_mask]
+                ch_chunk = ch_chunk[nonnegative_mask]
+
+            n_new = len(t_chunk)
+            if n_new and (ch_chunk.min() < ch_info.min or ch_chunk.max() > ch_info.max):
+                raise ValueError(
+                    f"Channel values {ch_chunk.min()}..{ch_chunk.max()} do not fit in "
+                    "uint8."
+                )
+            ch_chunk = ch_chunk.astype(np.uint8, copy=False)
+            t_ds.resize(n_total + n_new, axis=0)
+            ch_ds.resize(n_total + n_new, axis=0)
+            t_ds[n_total : n_total + n_new] = t_chunk
+            ch_ds[n_total : n_total + n_new] = ch_chunk
+            n_total += n_new
+
+            while progress_every and n_total >= next_progress:
+                print(f"Merged records: {next_progress:,}")
+                next_progress += progress_every
+
+        h5.attrs["negative_timestamp_events_removed"] = negative_timestamp_events_removed
+
+        if sort_by_timestamp:
+            was_reordered = _sort_h5_timetags(t_ds, ch_ds)
+            h5.attrs["timestamps_sorted"] = True
+            h5.attrs["timestamp_sort_order"] = "stable ascending t_ps"
+            if was_reordered:
+                print("Sorted combined t_ps and applied the same order to ch.")
+
+    if n_total == 0:
+        raise ValueError("Time Tagger X/HydraHarp merge returned no timetag records.")
+
+    print(f"Merged records: {n_total:,}")
+    if negative_timestamp_events_removed:
+        print(f"Removed {negative_timestamp_events_removed:,} event(s) with t_ps < 0.")
+    print(f"Saved H5 file: {output_filename}")
+    print(f"Rows saved: {n_total}")
+    return output_filename
+
+
 def timetag_to_h5_qutag(
     filename=None,
     header_lines=1,
@@ -875,7 +1116,7 @@ def timetag_to_h5_fast(
 
     This has the same first-trigger alignment, negative timestamp removal,
     channel offset, and stable timestamp sort as
-    :func:`timetag_to_h5`. It is faster for recordings that fit comfortably
+    :func:`timetag_to_h5_qutagHH`. It is faster for recordings that fit comfortably
     in RAM, but intentionally uses substantially more memory.
     """
     if filename is None:
@@ -1102,7 +1343,7 @@ def timetag_channel_time_difference(
     show=True,
     bin_s=0.1,
 ):
-    """Plot binned channel delay and clock-frequency skew.
+    """Plot channel delay and optional clock-frequency skew.
 
     The timestamps for each channel are sorted chronologically and paired by
     event order. If the channels contain different numbers of events, the
@@ -1120,9 +1361,9 @@ def timetag_channel_time_difference(
     try:
         bin_s = float(bin_s)
     except (TypeError, ValueError) as exc:
-        raise ValueError("bin_s must be a positive duration in seconds.") from exc
-    if not np.isfinite(bin_s) or bin_s <= 0:
-        raise ValueError("bin_s must be a positive duration in seconds.")
+        raise ValueError("bin_s must be zero or a positive duration in seconds.") from exc
+    if not np.isfinite(bin_s) or bin_s < 0:
+        raise ValueError("bin_s must be zero or a positive duration in seconds.")
 
     ch_a = int(ch_a)
     ch_b = int(ch_b)
@@ -1146,7 +1387,11 @@ def timetag_channel_time_difference(
     figure, (axis, skew_axis, skew_rate_axis) = plt.subplots(
         3, 1, sharex=True, figsize=(12, 9)
     )
-    axis.set_ylabel(f"Mean timestamp difference ({bin_s:g} s bins, us)")
+    raw_plot_mode = bin_s == 0
+    if raw_plot_mode:
+        axis.set_ylabel("Timestamp difference (raw pairs, us)")
+    else:
+        axis.set_ylabel(f"Mean timestamp difference ({bin_s:g} s bins, us)")
     axis.grid(True, alpha=0.3)
     clock_skew_us_per_s = []
     clock_skew_rate_us_per_s2 = []
@@ -1156,7 +1401,16 @@ def timetag_channel_time_difference(
     binned_pair_counts = []
     valid_pairs = np.isfinite(recording_time_s) & np.isfinite(difference_ps)
     valid_indices = np.flatnonzero(valid_pairs)
-    if len(valid_indices):
+    if raw_plot_mode:
+        # Preserve every valid chronological pair exactly as calculated above.
+        # The existing binned_* attributes expose the plotted values in either
+        # mode; in raw mode every point is a single pair.
+        binned_time_s = recording_time_s[valid_indices].astype(float)
+        binned_time_difference_us = (
+            difference_ps[valid_indices].astype(np.float64) * 1e-6
+        )
+        binned_pair_counts = np.ones(len(valid_indices), dtype=np.int64)
+    elif len(valid_indices):
         valid_time_s = recording_time_s[valid_indices]
         relative_bin_position = (valid_time_s - valid_time_s[0]) / bin_s
         # Advance by one floating-point step so a sample exactly on a bin edge
@@ -1216,9 +1470,12 @@ def timetag_channel_time_difference(
             markersize=3,
             alpha=0.7,
         )
-    skew_axis.set_ylabel(
-        f"u0: clock-frequency skew ({bin_s:g} s bins, us/s)", color="tab:red"
-    )
+    if raw_plot_mode:
+        skew_axis.set_ylabel("u0: not calculated in raw mode", color="tab:red")
+    else:
+        skew_axis.set_ylabel(
+            f"u0: clock-frequency skew ({bin_s:g} s bins, us/s)", color="tab:red"
+        )
     skew_axis.tick_params(axis="y", labelcolor="tab:red")
     skew_axis.grid(True, alpha=0.3)
     if len(clock_skew_rate_ns_per_s2):
@@ -1231,9 +1488,12 @@ def timetag_channel_time_difference(
             alpha=0.7,
         )
     skew_rate_axis.set_xlabel("Recording Time (s)")
-    skew_rate_axis.set_ylabel(
+    if raw_plot_mode:
+        skew_rate_axis.set_ylabel("u1: not calculated in raw mode", color="tab:green")
+    else:
+        skew_rate_axis.set_ylabel(
         f"u1: clock-skew rate ({bin_s:g} s bins, ns/s²)", color="tab:green"
-    )
+        )
     skew_rate_axis.tick_params(axis="y", labelcolor="tab:green")
     skew_rate_axis.grid(True, alpha=0.3)
     # Make the derived data accessible without changing the existing return tuple.
@@ -3205,11 +3465,11 @@ def _build_argument_parser():
     inspect_parser.add_argument("filename", nargs="?", help=".npz, .h5, .hdf5, or .mat file")
 
     convert_parser = commands.add_parser(
-        "convert", help="merge QuTAG and matching HydraHarp timetags into H5"
+        "convert", help="merge Time Tagger X .ttbin and matching HydraHarp timetags into H5"
     )
-    convert_parser.add_argument("filename", nargs="?", help="QuTAG .txt, .csv, or .bin file")
+    convert_parser.add_argument("filename", nargs="?", help="Time Tagger X .ttbin file")
     convert_parser.add_argument(
-        "--fast", action="store_true", help="use the faster in-memory conversion"
+        "--fast", action="store_true", help="use the legacy QuTAG in-memory conversion"
     )
 
     truncate_parser = commands.add_parser(
