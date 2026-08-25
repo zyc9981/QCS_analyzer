@@ -30,7 +30,7 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 if __name__ == "__main__":
     # timetag_to_h5(ch_trig_time_tagger=3, sort_by_timestamp=False)
     # timetag_to_h5_TTXonly()
-    # trancate_timetag(1200)
+    # trancate_timetag(60)
 
     # results = load_g2_results()
     # fit = fit_g2(
@@ -68,8 +68,8 @@ if __name__ == "__main__":
         # ch_hh=4,
         ch_hh=7,
         return_parameters=True,
-        correction_mode="first",
-        # correction_mode="global",
+        # correction_mode="first",
+        correction_mode="global",
         # correction_mode="per_trigger",
     )
     
@@ -128,6 +128,7 @@ if __name__ == "__main__":
 
         Ta_ref_s=0.1,
         # show_fit=True,
+        second_order_fit=True,
 
         Freq = 50e6,
     )

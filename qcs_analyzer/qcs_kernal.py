@@ -12,6 +12,7 @@ def u0_estimator(t_ref_0, t_ref_1):
 def qcs_ref_estimator(
     tau,
     t,
+    order=3,
     N_sample=None,
     t_eval_ps=None,
 ):
@@ -25,7 +26,7 @@ def qcs_ref_estimator(
 
     tau = np.asarray(tau).ravel()[:N_sample]
     t = np.asarray(t).ravel()[:N_sample]
-    fit = np.polyfit(t, tau, 1)
+    fit = np.polyfit(t, tau, order)
     # t_center = (t[0] + t[-1]) / 2
     # tau_center = np.polyval(fit, t_center)
 
@@ -88,8 +89,9 @@ def qcs_kernal(
     },
     # sour_freq=100e6,
     fwhm_calib_ps=1000,
+    second_order_fit=False,
     show_fit=False,
-    Freq=75e6,
+    Freq=50e6,
 ):
     """
     Chronologically scan paired-channel data in adaptive Ta intervals.
@@ -140,11 +142,15 @@ def qcs_kernal(
         "T_lastmid_ps": float(0.0),
         "T_rt_lastmid_ps": float(0.0),
         "u0_rt": float(0.0),
-        # "u1": 0.0,
+
+        # Second_order_fit parameters
+        "u1": 0.0,
+        # "u0_lastmid": float(0.0)
     }
 
     # Temporary: calculate u0_init from classical recorded pulses
     state["u0"] = u0_estimator(t_ref_0, t_ref_1)
+    # state["u0_lastmid"] = state["u0"]
     # print(state["u0"])
 
     T_file_s = (np.max(t_ps) - np.min(t_ps)) * 1e-12
@@ -219,7 +225,10 @@ def qcs_kernal(
         acquisition_t_0 = t_0[index_0:end_index_0]
         acquisition_t_0rt = t_0[index_0rt:end_index_0]
         acquisition_t_1 = t_1[index_1:end_index_1]
-        acquisition_t_1 = acquisition_t_1 - (acquisition_t_1 - acquisition_t_1[0]) * state["u0"] + state["u0"] * state["Ta_s"] * 1e12 / 2
+        x_ps = acquisition_t_1 - acquisition_t_1[0]
+        T_ps = state["Ta_s"] * 1e12 / 2
+        # acquisition_t_1 = acquisition_t_1 - (acquisition_t_1 - acquisition_t_1[0]) * state["u0"] + state["u0"] * state["Ta_s"] * 1e12 / 2
+        acquisition_t_1 = acquisition_t_1 - state["u0"] * x_ps - 0.5 * state["u1"] * (x_ps ** 2) + state["u0"] * T_ps + 0.5 * state["u1"] * (T_ps ** 2)
         acquisition_t_2 = t_2[index_2:end_index_2]
         # acquisition_t_2 = acquisition_t_2 - (acquisition_t_2 - acquisition_t_2[0]) * state["u0_rt"] + state["u0_rt"] * state["Ta_rt_s"] * 1e12 / 2
 
@@ -435,9 +444,20 @@ def qcs_kernal(
         tau_ref_uncertainty_ps_records[acquisition_index] = tau_ref_uncertainty_ps / np.sqrt(N_ref_samples)
 
         if acquisition_index > 0:
-            udrift = (fit["center"] - tau_predicted_ps) / (acquisition["point_ps"] - state["T_lastmid_ps"])
-            u0 = state["u0"] + udrift
+            # udrift = (fit["center"] - tau_predicted_ps) / (acquisition["point_ps"] - state["T_lastmid_ps"])
+            # u0 = state["u0"] + udrift
+            # state["u0"] = u0
+
+            # First order correction
+            u0 = (fit["center"] - state["tau_ps"]) / (acquisition["point_ps"] - state["T_lastmid_ps"])
+            udrift = u0 - state["u0"]
+            u0_last = state["u0"]
             state["u0"] = u0
+
+            # Second order correction
+            if second_order_fit:
+                u1 = (state["u0"] - u0_last) / (acquisition["point_ps"] - state["T_lastmid_ps"])
+                state["u1"] = u1
             
             Ta_s = np.round((fwhm_calib_ps / 5 / np.abs(udrift) * 1e-12) / Ta_s_init) * Ta_s_init
             Ta_s = np.min([Ta_s, Ta_s_max])
