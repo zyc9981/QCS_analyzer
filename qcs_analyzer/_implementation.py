@@ -1662,11 +1662,14 @@ def timetag_correction(
     adjacent trigger pair defines a local linear
     mapping (``correction_mode="per_trigger"``), so each matched trigger is
     aligned exactly. Set ``correction_mode="global"`` for the former single
-    linear fit across all trigger pairs. The correction is applied to QuTAG
+    linear fit across all trigger pairs, or ``correction_mode="first"`` to
+    align only the first trigger from each tagger without changing the clock
+    slope. The correction is applied to QuTAG
     channels from 0 through ``qutag_channel_max``; HydraHarp channels are
     unchanged. The returned ``t_ps`` and ``ch`` arrays are both clipped to
     the shared recording interval: ``0 <= t_ps <=`` the duration of the
-    shorter tagger recording. At least two paired trigger events are required.
+    shorter tagger recording. ``per_trigger`` and ``global`` require at least
+    two paired trigger events; ``first`` requires only one per tagger.
     """
     t_ps = np.asarray(t_ps).ravel()
     ch = np.asarray(ch).ravel()
@@ -1675,8 +1678,24 @@ def timetag_correction(
 
     ch_qutag = int(ch_qutag)
     ch_hh = int(ch_hh)
-    qutag_trigger_timestamps = np.sort(t_ps[ch == ch_qutag].astype(np.float64))
-    hydraharp_trigger_timestamps = np.sort(t_ps[ch == ch_hh].astype(np.float64))
+    correction_mode = str(correction_mode).lower()
+    if correction_mode not in ("per_trigger", "global", "first"):
+        raise ValueError("correction_mode must be 'per_trigger', 'global', or 'first'.")
+
+    if correction_mode == "first":
+        qutag_trigger_timestamps = t_ps[ch == ch_qutag]
+        hydraharp_trigger_timestamps = t_ps[ch == ch_hh]
+        if len(qutag_trigger_timestamps):
+            qutag_trigger_timestamps = np.array(
+                [np.min(qutag_trigger_timestamps)], dtype=np.float64
+            )
+        if len(hydraharp_trigger_timestamps):
+            hydraharp_trigger_timestamps = np.array(
+                [np.min(hydraharp_trigger_timestamps)], dtype=np.float64
+            )
+    else:
+        qutag_trigger_timestamps = np.sort(t_ps[ch == ch_qutag].astype(np.float64))
+        hydraharp_trigger_timestamps = np.sort(t_ps[ch == ch_hh].astype(np.float64))
     if len(qutag_trigger_timestamps) == 0 or len(hydraharp_trigger_timestamps) == 0:
         raise ValueError(
             f"Both trigger channels must contain events; QuTAG ch {ch_qutag}: "
@@ -1689,32 +1708,43 @@ def timetag_correction(
     qutag_trigger_skip_count = 0
     hydraharp_trigger_skip_count = 0
     pair_count = min(len(qutag_trigger_timestamps), len(hydraharp_trigger_timestamps))
-    if pair_count < 2:
-        raise ValueError("At least two paired trigger events are required for timebase correction.")
+    if pair_count < 1:
+        raise ValueError("At least one paired trigger event is required for timebase correction.")
+    if correction_mode != "first" and pair_count < 2:
+        raise ValueError(
+            "At least two paired trigger events are required for per_trigger or global correction."
+        )
 
     qutag_trigger_pairs = qutag_trigger_timestamps[:pair_count]
     hydraharp_trigger_pairs = hydraharp_trigger_timestamps[:pair_count]
     qutag_reference_t_ps = qutag_trigger_pairs[0]
     hydraharp_reference_t_ps = hydraharp_trigger_pairs[0]
-    qutag_elapsed_ps = qutag_trigger_pairs - qutag_reference_t_ps
-    hydraharp_elapsed_ps = hydraharp_trigger_pairs - hydraharp_reference_t_ps
-    qutag_interval_ps = np.diff(qutag_trigger_pairs)
-    hydraharp_interval_ps = np.diff(hydraharp_trigger_pairs)
-    if np.any(qutag_interval_ps <= 0):
-        raise ValueError("QuTAG trigger timestamps do not span elapsed time.")
-
-    correction_mode = str(correction_mode).lower()
-    if correction_mode not in ("per_trigger", "global"):
-        raise ValueError("correction_mode must be 'per_trigger' or 'global'.")
-
-    local_time_scales = hydraharp_interval_ps / qutag_interval_ps
-    overall_time_scale = float(
-        hydraharp_elapsed_ps[-1] / qutag_elapsed_ps[-1]
-    )
+    if correction_mode == "first":
+        qutag_elapsed_ps = np.array([0.0])
+        hydraharp_elapsed_ps = np.array([0.0])
+        local_time_scales = np.array([], dtype=float)
+        overall_time_scale = 1.0
+        trigger_pairs_used = 1
+    else:
+        qutag_elapsed_ps = qutag_trigger_pairs - qutag_reference_t_ps
+        hydraharp_elapsed_ps = hydraharp_trigger_pairs - hydraharp_reference_t_ps
+        qutag_interval_ps = np.diff(qutag_trigger_pairs)
+        hydraharp_interval_ps = np.diff(hydraharp_trigger_pairs)
+        if np.any(qutag_interval_ps <= 0):
+            raise ValueError("QuTAG trigger timestamps do not span elapsed time.")
+        local_time_scales = hydraharp_interval_ps / qutag_interval_ps
+        overall_time_scale = float(
+            hydraharp_elapsed_ps[-1] / qutag_elapsed_ps[-1]
+        )
+        trigger_pairs_used = pair_count
     corrected_t_ps = t_ps.astype(np.float64, copy=True)
     qutag_event_mask = (ch >= 0) & (ch <= int(qutag_channel_max))
     qutag_event_timestamps = corrected_t_ps[qutag_event_mask]
-    if correction_mode == "per_trigger":
+    if correction_mode == "first":
+        corrected_t_ps[qutag_event_mask] = (
+            qutag_event_timestamps - qutag_reference_t_ps + hydraharp_reference_t_ps
+        )
+    elif correction_mode == "per_trigger":
         # Use the scale for the trigger interval containing each event. Values
         # before/after the trigger range use the first/last interval to
         # extrapolate linearly.
@@ -1751,9 +1781,9 @@ def timetag_correction(
     removed_outside_shared_interval = int(len(corrected_t_ps) - np.count_nonzero(shared_interval_mask))
     corrected_t_ps = corrected_t_ps[shared_interval_mask]
     corrected_ch = ch[shared_interval_mask]
-    chronological_order = np.argsort(corrected_t_ps, kind="stable")
-    corrected_t_ps = corrected_t_ps[chronological_order]
-    corrected_ch = corrected_ch[chronological_order]
+    # chronological_order = np.argsort(corrected_t_ps, kind="stable")
+    # corrected_t_ps = corrected_t_ps[chronological_order]
+    # corrected_ch = corrected_ch[chronological_order]
 
     correction = {
         "correction_mode": correction_mode,
@@ -1761,7 +1791,7 @@ def timetag_correction(
         "local_time_scales": local_time_scales,
         "qutag_reference_t_ps": qutag_reference_t_ps,
         "hydraharp_reference_t_ps": hydraharp_reference_t_ps,
-        "paired_trigger_count": pair_count,
+        "paired_trigger_count": trigger_pairs_used,
         "qutag_trigger_skip_count": qutag_trigger_skip_count,
         "hydraharp_trigger_skip_count": hydraharp_trigger_skip_count,
         "corrected_qutag_channel_max": int(qutag_channel_max),
@@ -1770,7 +1800,7 @@ def timetag_correction(
     }
     print(
         "Timebase correction: "
-        f"{pair_count:,} trigger pairs, mode={correction_mode}, "
+        f"{trigger_pairs_used:,} trigger pairs used, mode={correction_mode}, "
         f"overall QuTAG scale={overall_time_scale:.12g}, "
         f"reference {qutag_reference_t_ps:g} ps -> {hydraharp_reference_t_ps:g} ps; "
         f"kept 0 to {shared_duration_ps:g} ps."

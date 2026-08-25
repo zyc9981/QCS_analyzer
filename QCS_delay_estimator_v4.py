@@ -28,9 +28,9 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 
 
 if __name__ == "__main__":
-    timetag_to_h5(ch_trig_time_tagger=3)
+    # timetag_to_h5(ch_trig_time_tagger=3, sort_by_timestamp=False)
     # timetag_to_h5_TTXonly()
-    # trancate_timetag(60)
+    # trancate_timetag(1200)
 
     # results = load_g2_results()
     # fit = fit_g2(
@@ -68,7 +68,8 @@ if __name__ == "__main__":
         # ch_hh=4,
         ch_hh=7,
         return_parameters=True,
-        correction_mode="global",
+        correction_mode="first",
+        # correction_mode="global",
         # correction_mode="per_trigger",
     )
     
@@ -110,7 +111,7 @@ if __name__ == "__main__":
     #     # show=False,
     # )
 
-    Ta_s = 0.5
+    Ta_s = 0.2
     qcs_result = qcs_kernal(
         t_ps,
         ch,
@@ -121,8 +122,8 @@ if __name__ == "__main__":
 
         fit_curve="g2calib_2",
         time_bin_ps_init=200,
-        # Ta_s_max=1,
-        Ta_s_max=Ta_s,
+        Ta_s_max=5,
+        # Ta_s_max=Ta_s,
         # tau_span_ps_init=120e3,
 
         Ta_ref_s=0.1,
