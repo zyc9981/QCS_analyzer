@@ -36,31 +36,26 @@ def qcs_ref_estimator(
     return tau_at_point, np.std(tau - np.polyval(fit, t)), N_sample
 
 
-# def qcs_ref_estimator2(
-#     tau,
-#     t,
-#     N_sample=None,
-#     t_eval_ps=None,
-# ):
-#     """Return residual standard deviation and fitted tau at the time-span center."""
-#     if N_sample != None:
-#         N_sample = int(np.min([np.size(tau), N_sample]))
-#     else:
-#         N_sample = np.size(tau)
-#     if N_sample < 2:
-#         raise ValueError("tau and t must contain at least two samples for a linear fit.")
+def qcs_ref_estimator2(
+    tau,
+    t,
+    N_sample=None,
+    t_eval_ps=None,
+):
+    """Return residual standard deviation and fitted tau at the time-span center."""
+    if N_sample != None:
+        N_sample = int(np.min([np.size(tau), N_sample]))
+    else:
+        N_sample = np.size(tau)
+    if N_sample < 2:
+        raise ValueError("tau and t must contain at least two samples for a linear fit.")
 
-#     tau = np.asarray(tau).ravel()[:N_sample]
-#     t = np.asarray(t).ravel()[:N_sample]
-#     fit = np.polyfit(t, tau, 1)
-#     # t_center = (t[0] + t[-1]) / 2
-#     # tau_center = np.polyval(fit, t_center)
+    tau = np.asarray(tau).ravel()[:N_sample]
+    t = np.asarray(t).ravel()[:N_sample]
 
-#     if t_eval_ps == None:
-#         t_eval_ps = (t[0] + t[-1]) / 2
-#     tau_at_point = np.polyval(fit, t_eval_ps)
+    tau_at_point = np.mean(tau)
 
-#     return tau_at_point, np.std(tau - np.polyval(fit, t)), N_sample
+    return tau_at_point, np.std(tau - tau_at_point), N_sample
 
 
 def qcs_kernal(
@@ -542,6 +537,10 @@ def qcs_kernal(
     ax5.set_ylabel(r"$\tau_{ref}$ (ps)")
     ax5.grid(True)
 
+    # tmp = tau_ref_ps_records - tau_ref_ps_records[0]
+    # tmp_idx = np.where(tmp > 100)[0]
+    # print(tmp_idx)
+
     axes[-1].set_xlabel("Record Points (s)")
     fig1.tight_layout()
 
@@ -577,8 +576,11 @@ def qcs_kernal(
     axes = axes[:, 0]
 
     tau_diff = tau_ps_records - tau_ref_ps_records
+    # tau_diff = np.delete(tau_diff, tmp_idx)
+    # point_records2 = np.delete(point_records, tmp_idx)
     ax1 = axes[0]
     ax1.plot(point_records * 1e-12, tau_diff - np.mean(tau_diff), "o-")
+    # ax1.plot(point_records2 * 1e-12, tau_diff - np.mean(tau_diff), "o-")
     ax1.set_ylabel(r"$\tau$ (ps)")
     ax1.grid(True)
 

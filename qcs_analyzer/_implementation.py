@@ -339,8 +339,27 @@ def _iter_qutag_binary_chunks(
             remaining -= len(records)
 
 
+def _normalize_timetagger_physical_channels(channels):
+    """Map Time Tagger X edge channels +/-1 through +/-4 to inputs 1 through 4.
+
+    Swabian uses negative channel IDs for falling edges.  QCS analysis treats
+    each physical Time Tagger X input as one channel, so this intentionally
+    discards edge direction: for example, both ``-3`` and ``3`` become ``3``.
+    Other channel IDs are left unchanged.
+    """
+    channels = np.asarray(channels, dtype=np.int64)
+    physical_channels = np.abs(channels)
+    negative_input_mask = (channels < 0) & np.isin(physical_channels, (1, 2, 3, 4))
+    if not np.any(negative_input_mask):
+        return channels
+
+    normalized_channels = channels.copy()
+    normalized_channels[negative_input_mask] = physical_channels[negative_input_mask]
+    return normalized_channels
+
+
 def _iter_timetagger_ttbin_chunks(filename, chunk_size=1_000_000):
-    """Yield timestamp/channel chunks from a Time Tagger X FileWriter stream."""
+    """Yield Time Tagger X chunks with physical inputs +/-1 through +/-4 normalized."""
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive.")
     if TimeTagger is None:
@@ -360,7 +379,7 @@ def _iter_timetagger_ttbin_chunks(filename, chunk_size=1_000_000):
     while reader.hasData():
         buffer = reader.getData(int(chunk_size))
         timestamps = np.asarray(buffer.getTimestamps(), dtype=np.int64)
-        channels = np.asarray(buffer.getChannels(), dtype=np.int64)
+        channels = _normalize_timetagger_physical_channels(buffer.getChannels())
         if len(timestamps) != len(channels):
             raise ValueError("Time Tagger X FileReader returned mismatched timestamps and channels.")
         if len(timestamps):
@@ -548,7 +567,8 @@ def _sort_h5_timetags(t_dataset, ch_dataset):
 # =============================================================================
 # TIME TAGGER X / QUTAG + HYDRAHARP FILE CONVERSION
 # =============================================================================
-# timetag_to_h5_qutagHH() and timetag_to_h5() are chunked and memory-efficient.
+# timetag_to_h5_qutagHH(), timetag_to_h5(), and timetag_to_h5_TTXonly() are
+# chunked and memory-efficient.
 # timetag_to_h5_fast() remains the legacy QuTAG in-memory converter.
 
 def timetag_to_h5_qutagHH(
@@ -781,6 +801,8 @@ def timetag_to_h5(
     numbered data blocks. The FileReader then includes ``filename.1.ttbin``,
     ``filename.2.ttbin``, and any later blocks automatically. The output H5
     retains the established ``t_ps`` (int64, ps) and ``ch`` (uint8) layout.
+    Time Tagger X channels ``-1`` through ``-4`` are normalized to physical
+    channels ``1`` through ``4`` before merging.
     """
     if filename is None:
         filename = _open_file_dialog(
@@ -875,6 +897,7 @@ def timetag_to_h5(
         h5.attrs["timestamp_unit"] = "ps"
         h5.attrs["channel_dtype"] = "uint8"
         h5.attrs["time_tagger_x_source_filename"] = str(time_tagger_path)
+        h5.attrs["time_tagger_x_edge_channels_normalized"] = "abs(channel) for inputs 1 through 4"
         h5.attrs["hydraharp_source_filename"] = str(hydraharp_path)
         h5.attrs["hydraharp_channel_offset"] = int(hydraharp_channel_offset)
         h5.attrs["time_tagger_x_trigger_channel"] = int(ch_trig_time_tagger)
@@ -947,6 +970,116 @@ def timetag_to_h5(
     print(f"Merged records: {n_total:,}")
     if negative_timestamp_events_removed:
         print(f"Removed {negative_timestamp_events_removed:,} event(s) with t_ps < 0.")
+    print(f"Saved H5 file: {output_filename}")
+    print(f"Rows saved: {n_total}")
+    return output_filename
+
+
+def timetag_to_h5_TTXonly(
+    filename=None,
+    output_filename=None,
+    chunk_size=1_000_000,
+    compression="gzip",
+    progress_every=1_000_000,
+    sort_by_timestamp=True,
+):
+    """Convert one Time Tagger X FileWriter ``.ttbin`` stream to HDF5.
+
+    No HydraHarp file is selected, read, or merged. Timestamps are retained
+    exactly as stored by the Time Tagger X FileWriter (they are not rebased to
+    a trigger). Pass the sequence header (``filename.ttbin``), not a numbered
+    data block; FileReader automatically includes all ``.1.ttbin``,
+    ``.2.ttbin``, and later blocks.
+
+    The output uses the standard ``t_ps`` (int64, ps) and ``ch`` (uint8)
+    datasets. Its default name is ``<recording>_TTXonly.h5`` to avoid
+    overwriting the combined Time Tagger X + HydraHarp conversion. Time Tagger
+    X channels ``-1`` through ``-4`` are normalized to physical channels
+    ``1`` through ``4``.
+    """
+    if filename is None:
+        filename = _open_file_dialog(
+            "Select Time Tagger X .ttbin file", TIMETAGGER_TTBIN_FILETYPES
+        )
+    filename = _require_selected_filename(filename, "Time Tagger X .ttbin file")
+
+    selected_time_tagger_path = Path(filename)
+    if selected_time_tagger_path.suffix.lower() != ".ttbin":
+        raise ValueError("Time Tagger X input must be a FileWriter .ttbin file.")
+    time_tagger_path = _timetagger_sequence_header_filename(selected_time_tagger_path)
+    if not time_tagger_path.is_file():
+        raise FileNotFoundError(f"Time Tagger X .ttbin file was not found: {time_tagger_path}")
+    if time_tagger_path != selected_time_tagger_path:
+        print(f"Using FileWriter sequence header: {time_tagger_path}")
+
+    if output_filename is None:
+        output_filename = str(
+            time_tagger_path.with_name(f"{time_tagger_path.stem}_TTXonly.h5")
+        )
+
+    print(f"Time Tagger X input: {time_tagger_path}")
+    ch_info = np.iinfo(np.uint8)
+    n_total = 0
+    next_progress = progress_every
+
+    with h5py.File(output_filename, "w") as h5:
+        h5.attrs["source_format"] = "timetagger_x_ttbin"
+        h5.attrs["timestamp_unit"] = "ps"
+        h5.attrs["channel_dtype"] = "uint8"
+        h5.attrs["time_tagger_x_source_filename"] = str(time_tagger_path)
+        h5.attrs["time_tagger_x_edge_channels_normalized"] = "abs(channel) for inputs 1 through 4"
+        h5.attrs["timestamps_rebased"] = False
+        h5.attrs["hydraharp_merged"] = False
+
+        t_ds = h5.create_dataset(
+            "t_ps",
+            shape=(0,),
+            maxshape=(None,),
+            dtype=np.int64,
+            chunks=(min(chunk_size, 1_000_000),),
+            compression=compression,
+        )
+        ch_ds = h5.create_dataset(
+            "ch",
+            shape=(0,),
+            maxshape=(None,),
+            dtype=np.uint8,
+            chunks=(min(chunk_size, 1_000_000),),
+            compression=compression,
+        )
+
+        for t_chunk, ch_chunk in _iter_timetagger_ttbin_chunks(
+            time_tagger_path, chunk_size=chunk_size
+        ):
+            if ch_chunk.min() < ch_info.min or ch_chunk.max() > ch_info.max:
+                raise ValueError(
+                    f"Channel values {ch_chunk.min()}..{ch_chunk.max()} do not fit in uint8."
+                )
+            ch_chunk = ch_chunk.astype(np.uint8, copy=False)
+            n_new = len(t_chunk)
+            t_ds.resize(n_total + n_new, axis=0)
+            ch_ds.resize(n_total + n_new, axis=0)
+            t_ds[n_total : n_total + n_new] = t_chunk
+            ch_ds[n_total : n_total + n_new] = ch_chunk
+            n_total += n_new
+
+            while progress_every and n_total >= next_progress:
+                print(f"Converted records: {next_progress:,}")
+                next_progress += progress_every
+
+        if sort_by_timestamp:
+            was_reordered = _sort_h5_timetags(t_ds, ch_ds)
+            h5.attrs["timestamps_sorted"] = True
+            h5.attrs["timestamp_sort_order"] = "stable ascending t_ps"
+            if was_reordered:
+                print("Sorted t_ps and applied the same order to ch.")
+        else:
+            h5.attrs["timestamps_sorted"] = False
+
+    if n_total == 0:
+        raise ValueError("Time Tagger X FileWriter stream contains no timetag records.")
+
+    print(f"Converted records: {n_total:,}")
     print(f"Saved H5 file: {output_filename}")
     print(f"Rows saved: {n_total}")
     return output_filename
@@ -1092,7 +1225,6 @@ def timetag_to_h5_qutag(
     print(f"Saved H5 file: {output_filename}")
     print(f"Rows saved: {n_total}")
     return output_filename
-
 
 
 def timetag_to_h5_fast(
@@ -2309,8 +2441,8 @@ def _g2calib_1(x, height, center, sigma, offset):
     return offset + height * (left_term + right_term)
 
 
-_GAMMA = 702.67227
-_SIGMAG = 78.800111
+_GAMMA = 732.22054
+_SIGMAG = 71.134089
 _A = 1.0 / (np.sqrt(2.0) * _SIGMAG)
 _B = 1.0 / _GAMMA
 _COEF1 = _GAMMA * np.exp(-_SIGMAG**2 / _GAMMA**2)
