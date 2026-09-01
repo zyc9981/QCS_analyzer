@@ -12,11 +12,16 @@ def u0_estimator(t_ref_0, t_ref_1):
 def qcs_ref_estimator(
     tau,
     t,
-    order=3,
+    order=5,
     N_sample=None,
     t_eval_ps=None,
 ):
-    """Return residual standard deviation and fitted tau at the time-span center."""
+    """Return residual standard deviation and fitted tau at the requested time.
+
+    The polynomial is fit using seconds centered on the selected samples rather
+    than absolute picosecond timestamps.  This keeps the polynomial basis well
+    conditioned without changing the physical time represented by the fit.
+    """
     if N_sample != None:
         N_sample = int(np.min([np.size(tau), N_sample]))
     else:
@@ -26,15 +31,17 @@ def qcs_ref_estimator(
 
     tau = np.asarray(tau).ravel()[:N_sample]
     t = np.asarray(t).ravel()[:N_sample]
-    fit = np.polyfit(t, tau, order)
-    # t_center = (t[0] + t[-1]) / 2
-    # tau_center = np.polyval(fit, t_center)
 
     if t_eval_ps == None:
         t_eval_ps = (t[0] + t[-1]) / 2
-    tau_at_point = np.polyval(fit, t_eval_ps)
 
-    return tau_at_point, np.std(tau - np.polyval(fit, t)), N_sample
+    t_origin_ps = np.mean(t)
+    t_fit_s = (t - t_origin_ps) * 1e-12
+    t_eval_fit_s = (t_eval_ps - t_origin_ps) * 1e-12
+    fit = np.polyfit(t_fit_s, tau, order)
+    tau_at_point = np.polyval(fit, t_eval_fit_s)
+
+    return tau_at_point, np.std(tau - np.polyval(fit, t_fit_s)), N_sample
 
 
 def qcs_ref_estimator2(
@@ -140,11 +147,12 @@ def qcs_kernal(
         # "tau_span_ps": np.rint(float(1e12)/Freq) * 1.6,
         "u0": float(u0_init),
         "T_lastmid_ps": float(0.0),
+        "T_lastu0_ps": float(0.0),
         "T_rt_lastmid_ps": float(0.0),
         "u0_rt": float(0.0),
 
         # Second_order_fit parameters
-        "u1": 0.0,
+        "u1": float(0.0),
         # "u0_lastmid": float(0.0)
     }
 
@@ -172,6 +180,8 @@ def qcs_kernal(
     # S_peak_records = np.full(buffer_size, np.nan, dtype=float)
     # fwhm_uncertainty_records = np.full(buffer_size, np.nan, dtype=float)
     coincidence_records = np.full(buffer_size, np.nan, dtype=float)
+    u0_records = np.full(buffer_size, np.nan, dtype=float)
+    u1_records = np.full(buffer_size, np.nan, dtype=float)
 
     # fit_results = [None] * buffer_size
     # g2_results = [None] * buffer_size
@@ -227,8 +237,11 @@ def qcs_kernal(
         acquisition_t_1 = t_1[index_1:end_index_1]
         x_ps = acquisition_t_1 - acquisition_t_1[0]
         T_ps = state["Ta_s"] * 1e12 / 2
+        u0s = state["u0"] + state["u1"] *  (acquisition_t_1[0] - state["T_lastu0_ps"])
+        # u0s = state["u0"] + state["u1"] *  ((window_start_ps + window_end_ps) / 2 - state["T_lastu0_ps"])
         # acquisition_t_1 = acquisition_t_1 - (acquisition_t_1 - acquisition_t_1[0]) * state["u0"] + state["u0"] * state["Ta_s"] * 1e12 / 2
-        acquisition_t_1 = acquisition_t_1 - state["u0"] * x_ps - 0.5 * state["u1"] * (x_ps ** 2) + state["u0"] * T_ps + 0.5 * state["u1"] * (T_ps ** 2)
+        # acquisition_t_1 = acquisition_t_1 - state["u0"] * x_ps - 0.5 * state["u1"] * (x_ps ** 2) + state["u0"] * T_ps + 0.5 * state["u1"] * (T_ps ** 2)
+        acquisition_t_1 = acquisition_t_1 - u0s * x_ps - 0.5 * state["u1"] * (x_ps ** 2) + u0s * T_ps + 0.5 * state["u1"] * (T_ps ** 2)
         acquisition_t_2 = t_2[index_2:end_index_2]
         # acquisition_t_2 = acquisition_t_2 - (acquisition_t_2 - acquisition_t_2[0]) * state["u0_rt"] + state["u0_rt"] * state["Ta_rt_s"] * 1e12 / 2
 
@@ -315,7 +328,8 @@ def qcs_kernal(
         
         results = {
             "centers": centers.copy(),
-            "histogram": start_stop_results.copy(),
+            "histogram": start_stop_results.copy() / state["time_bin_ps"] * time_bin_ps_init,
+            "histogram_raw": start_stop_results.copy(),
             "T_acq_s": Ta_s,
             "chA": ch_0,
             "chB": ch_1,
@@ -354,6 +368,7 @@ def qcs_kernal(
             results_rt = {
                 "centers": centers_rt.copy(),
                 "histogram": start_stop_results_rt.copy() / state["time_bin_rt_ps"] * time_bin_ps_init,
+                "histogram_raw": start_stop_results_rt.copy(),
                 "T_acq_s": Ta_rt_s,
                 "chA": ch_0,
                 "chB": ch_2,
@@ -430,8 +445,8 @@ def qcs_kernal(
         sigma_rt_records[acquisition_index] = fit_rt["parameters"]["sigma"]
         tau_s_uncertainty_records[acquisition_index] = fit["center_uncertainty"]
         # fwhm_uncertainty_records[acquisition_index] = fit["fwhm_uncertainty"]
-        CC_count_records[acquisition_index] = np.sum(results["histogram"])
-        CC_count_rt_records[acquisition_index] = np.sum(results_rt["histogram"])
+        CC_count_records[acquisition_index] = np.sum(results["histogram_raw"])
+        CC_count_rt_records[acquisition_index] = np.sum(results_rt["histogram_raw"])
         # S_peak_records[acquisition_index] = np.sqrt(np.sum(results["histogram"]) ** 2 * np.size(results["centers"]) / np.size(acquisition_t_0) / np.size(acquisition_t_1))
 
         tau_ref_ps, tau_ref_uncertainty_ps, N_ref_samples = qcs_ref_estimator(
@@ -442,6 +457,7 @@ def qcs_kernal(
 
         tau_ref_ps_records[acquisition_index] = tau_ref_ps
         tau_ref_uncertainty_ps_records[acquisition_index] = tau_ref_uncertainty_ps / np.sqrt(N_ref_samples)
+        T_u0 = 0.0
 
         if acquisition_index > 0:
             # udrift = (fit["center"] - tau_predicted_ps) / (acquisition["point_ps"] - state["T_lastmid_ps"])
@@ -453,13 +469,15 @@ def qcs_kernal(
             udrift = u0 - state["u0"]
             u0_last = state["u0"]
             state["u0"] = u0
+            T_u0 = (acquisition["point_ps"] + state["T_lastmid_ps"]) / 2
 
             # Second order correction
             if second_order_fit:
-                u1 = (state["u0"] - u0_last) / (acquisition["point_ps"] - state["T_lastmid_ps"])
+                # u1 = (state["u0"] - u0_last) / (acquisition["point_ps"] - state["T_lastmid_ps"])
+                u1 = (state["u0"] - u0_last) / (T_u0 - state["T_lastu0_ps"])
                 state["u1"] = u1
             
-            Ta_s = np.round((fwhm_calib_ps / 5 / np.abs(udrift) * 1e-12) / Ta_s_init) * Ta_s_init
+            Ta_s = np.round((fwhm_calib_ps / 10 / np.abs(udrift) * 1e-12) / Ta_s_init) * Ta_s_init
             Ta_s = np.min([Ta_s, Ta_s_max])
             state["Ta_s"] = np.max([Ta_s_init, Ta_s])
             # state["time_bin_ps"] = round(time_bin_ps_init / state["Ta_s"] * Ta_s_init / 10.0) * 10.0
@@ -470,6 +488,9 @@ def qcs_kernal(
 
         state["tau_ps"] = fit["center"]
         state["T_lastmid_ps"] = acquisition["point_ps"]
+        state["T_lastu0_ps"] = T_u0
+        u0_records[acquisition_index] = state["u0"]
+        u1_records[acquisition_index] = state["u1"]
 
         if flag_rt == True:
             index_0rt = end_index_0
@@ -481,7 +502,7 @@ def qcs_kernal(
                 # u0 = state["u0"] + udrift
                 # state["u0"] = u0
                 
-                Ta_rt_s = np.round((fwhm_calib_ps / 5 / np.abs(udrift_rt) * 1e-12) / Ta_s_init) * Ta_s_init
+                Ta_rt_s = np.round((fwhm_calib_ps / 10 / np.abs(udrift_rt) * 1e-12) / Ta_s_init) * Ta_s_init
                 Ta_rt_s = np.min([Ta_rt_s, Ta_rt_s_max])
                 state["Ta_rt_s"] = np.max([Ta_s_init, Ta_rt_s])
                 time_bin_rt_ps = round(time_bin_ps_init / state["Ta_rt_s"] * Ta_s_init / 10.0) * 10.0
@@ -526,6 +547,8 @@ def qcs_kernal(
     CC_count_records = CC_count_records[record_slice]
     CC_count_rt_records = CC_count_rt_records[record_slice]
     coincidence_records = coincidence_records[record_slice]
+    u0_records = u0_records[record_slice]
+    u1_records = u1_records[record_slice]
     acquisition_index = len(point_records)
 
     # Fig1: one way details
@@ -556,6 +579,11 @@ def qcs_kernal(
     ax5.plot(point_records * 1e-12, tau_ref_ps_records - tau_ref_ps_records[0], "o-")
     ax5.set_ylabel(r"$\tau_{ref}$ (ps)")
     ax5.grid(True)
+
+    # ax6 = axes[5]
+    # ax6.plot(point_records * 1e-12, tau_ref_uncertainty_ps_records, "o-")
+    # ax6.set_ylabel(r"$\tau_{ref}$ (ps)")
+    # ax6.grid(True)
 
     # tmp = tau_ref_ps_records - tau_ref_ps_records[0]
     # tmp_idx = np.where(tmp > 100)[0]
@@ -641,3 +669,118 @@ def qcs_kernal(
         "figure3": fig3,
         # "axes": axes,
     }
+
+
+def qcs_plot(results):
+    point_records = results["center"]
+    tau_ps_records = results["tau"]
+    tau_rt_ps_records = results["tau_rt"]
+    tau_ref_ps_records = results["tau_ref"]
+    tau_ref_uncertainty_ps_records = results["tau_ref_uncertainty"]
+    epsilon_ps_records = results["epsilon"]
+    Ta_s_records = results["Ta"]
+    Ta_rt_s_records = results["Ta_rt"]
+    sigma_records = results["sigma"]
+    sigma_rt_records = results["sigma_rt"]
+    CC_count_records = results["CC"]
+    CC_count_rt_records = results["CC_rt"]
+    tau_diff = results["tau_diff"]
+
+    # Fig1: one way details
+    fig1, axes = plt.subplots(5, 1, sharex=True, squeeze=False)
+    axes = axes[:, 0]
+
+    ax1 = axes[0]
+    ax1.plot(point_records * 1e-12, tau_ps_records - tau_ps_records[0], "o-")
+    ax1.set_ylabel(r"$\tau$ (ps)")
+    ax1.grid(True)
+
+    ax2 = axes[1]
+    ax2.plot(point_records * 1e-12, Ta_s_records, "o-")
+    ax2.set_ylabel(r"$T_a$ (s)")
+    ax2.grid(True)
+
+    ax3 = axes[2]
+    ax3.plot(point_records * 1e-12, sigma_records, "o-")
+    ax3.set_ylabel(r"$\sigma$ (ps)")
+    ax3.grid(True)
+
+    ax4 = axes[3]
+    ax4.plot(point_records * 1e-12, CC_count_records, "o-")
+    ax4.set_ylabel(r"CC")
+    ax4.grid(True)
+
+    ax5 = axes[4]
+    ax5.plot(point_records * 1e-12, tau_ref_ps_records - tau_ref_ps_records[0], "o-")
+    ax5.set_ylabel(r"$\tau_{ref}$ (ps)")
+    ax5.grid(True)
+
+    # ax6 = axes[5]
+    # ax6.plot(point_records * 1e-12, tau_ref_uncertainty_ps_records, "o-")
+    # ax6.set_ylabel(r"$\tau_{ref}$ (ps)")
+    # ax6.grid(True)
+
+    # tmp = tau_ref_ps_records - tau_ref_ps_records[0]
+    # tmp_idx = np.where(tmp > 100)[0]
+    # print(tmp_idx)
+
+    axes[-1].set_xlabel("Record Points (s)")
+    fig1.tight_layout()
+
+    # Fig2: two way details
+    fig2, axes = plt.subplots(4, 1, sharex=True, squeeze=False)
+    axes = axes[:, 0]
+
+    ax1 = axes[0]
+    ax1.plot(point_records * 1e-12, tau_rt_ps_records - tau_rt_ps_records[0], "o-")
+    ax1.set_ylabel(r"$\tau_{rt}$ (ps)")
+    ax1.grid(True)
+
+    ax2 = axes[1]
+    ax2.plot(point_records * 1e-12, Ta_rt_s_records, "o-")
+    ax2.set_ylabel(r"$T_{a_rt}$ (s)")
+    ax2.grid(True)
+
+    ax3 = axes[2]
+    ax3.plot(point_records * 1e-12, sigma_rt_records, "o-")
+    ax3.set_ylabel(r"$\sigma_{rt}$ (ps)")
+    ax3.grid(True)
+
+    ax4 = axes[3]
+    ax4.plot(point_records * 1e-12, CC_count_rt_records, "o-")
+    ax4.set_ylabel(r"CC")
+    ax4.grid(True)
+
+    axes[-1].set_xlabel("Record Points (s)")
+    fig2.tight_layout()
+
+    # Fig3: summaries
+    fig3, axes = plt.subplots(2, 1, sharex=True, squeeze=False)
+    axes = axes[:, 0]
+
+    tau_diff = tau_ps_records - tau_ref_ps_records
+    # tau_diff = np.delete(tau_diff, tmp_idx)
+    # point_records2 = np.delete(point_records, tmp_idx)
+    ax1 = axes[0]
+    ax1.plot(point_records * 1e-12, tau_diff - np.mean(tau_diff), "o-")
+    # ax1.plot(point_records2 * 1e-12, tau_diff - np.mean(tau_diff), "o-")
+    ax1.set_ylabel(r"$\tau$ (ps)")
+    ax1.grid(True)
+
+    ax2 = axes[1]
+    ax2.plot(point_records * 1e-12, epsilon_ps_records, "o-")
+    ax2.set_ylabel(r"$\epsilon$ (ps)")
+    ax2.grid(True)
+
+    # ax3 = axes[2]
+    # ax3.plot(point_records * 1e-12, CC_count_records, "o-")
+    # ax3.set_ylabel(r"CC")
+    # ax3.grid(True)
+
+    axes[-1].set_xlabel("Record Points (s)")
+    fig3.tight_layout()
+
+    # print(np.std(tau_diff))
+    # print(np.mean(tau_diff))
+
+    plt.show()

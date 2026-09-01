@@ -48,7 +48,9 @@ DEFAULT_FILE_DIALOG_DIRECTORY = Path(
     # r"C:\Yichi Zhang\GHZ_QN\WDM_GHZ_Tx5\20260803_2timetaggers_test2"
     # r"C:\Yichi Zhang\QCS\20260816_OCXO_ADEV_test"
     # r"C:\Yichi Zhang\QCS\20260818_TwoWay_2tagger_test"
-    r"C:\Yichi Zhang\QCS\20260821_TwoWay_2tagger_TTXandHH"
+    # r"C:\Yichi Zhang\QCS\20260821_TwoWay_2tagger_TTXandHH"
+    # r"C:\Yichi Zhang\QCS\20260825_TwoWay_2tagger_TTXandHH"
+    r"C:\Yichi Zhang\QCS\20260831_OneWay_2tagger_TTXandHH"
 )
 
 TIMETAG_SOURCE_FILETYPES = [
@@ -1521,15 +1523,15 @@ def timetag_channel_time_difference(
     )
     raw_plot_mode = bin_s == 0
     if raw_plot_mode:
-        axis.set_ylabel("Timestamp difference (raw pairs, us)")
+        axis.set_ylabel("Timestamp difference (raw pairs, ps)")
     else:
-        axis.set_ylabel(f"Mean timestamp difference ({bin_s:g} s bins, us)")
+        axis.set_ylabel(f"Mean timestamp difference ({bin_s:g} s bins, ps)")
     axis.grid(True, alpha=0.3)
     clock_skew_us_per_s = []
     clock_skew_rate_us_per_s2 = []
     skew_time_s = []
     binned_time_s = []
-    binned_time_difference_us = []
+    binned_time_difference_ps = []
     binned_pair_counts = []
     valid_pairs = np.isfinite(recording_time_s) & np.isfinite(difference_ps)
     valid_indices = np.flatnonzero(valid_pairs)
@@ -1538,9 +1540,7 @@ def timetag_channel_time_difference(
         # The existing binned_* attributes expose the plotted values in either
         # mode; in raw mode every point is a single pair.
         binned_time_s = recording_time_s[valid_indices].astype(float)
-        binned_time_difference_us = (
-            difference_ps[valid_indices].astype(np.float64) * 1e-6
-        )
+        binned_time_difference_ps = difference_ps[valid_indices].astype(np.float64)
         binned_pair_counts = np.ones(len(valid_indices), dtype=np.int64)
     elif len(valid_indices):
         valid_time_s = recording_time_s[valid_indices]
@@ -1556,7 +1556,9 @@ def timetag_channel_time_difference(
             bin_time_s = recording_time_s[bin_indices]
             bin_delay_us = difference_ps[bin_indices].astype(np.float64) * 1e-6
             binned_time_s.append(np.mean(bin_time_s))
-            binned_time_difference_us.append(np.mean(bin_delay_us))
+            binned_time_difference_ps.append(
+                np.mean(difference_ps[bin_indices].astype(np.float64))
+            )
             binned_pair_counts.append(len(bin_indices))
 
             if len(bin_indices) < 3:
@@ -1582,12 +1584,12 @@ def timetag_channel_time_difference(
     clock_skew_rate_ns_per_s2 = clock_skew_rate_us_per_s2 * 1e3
     skew_time_s = np.asarray(skew_time_s, dtype=float)
     binned_time_s = np.asarray(binned_time_s, dtype=float)
-    binned_time_difference_us = np.asarray(binned_time_difference_us, dtype=float)
+    binned_time_difference_ps = np.asarray(binned_time_difference_ps, dtype=float)
     binned_pair_counts = np.asarray(binned_pair_counts, dtype=np.int64)
     if len(binned_time_s):
         axis.plot(
             binned_time_s,
-            binned_time_difference_us,
+            binned_time_difference_ps,
             "o-",
             color="tab:blue",
             markersize=3,
@@ -1636,7 +1638,7 @@ def timetag_channel_time_difference(
     axis.clock_skew_rate_ns_per_s2 = clock_skew_rate_ns_per_s2
     axis.clock_skew_time_s = skew_time_s
     axis.binned_time_s = binned_time_s
-    axis.binned_time_difference_us = binned_time_difference_us
+    axis.binned_time_difference_ps = binned_time_difference_ps
     axis.binned_pair_counts = binned_pair_counts
     axis.bin_s = bin_s
     figure.tight_layout()
@@ -1661,15 +1663,18 @@ def timetag_correction(
     trigger events are then paired by chronological order. By default, every
     adjacent trigger pair defines a local linear
     mapping (``correction_mode="per_trigger"``), so each matched trigger is
-    aligned exactly. Set ``correction_mode="global"`` for the former single
-    linear fit across all trigger pairs, or ``correction_mode="first"`` to
-    align only the first trigger from each tagger without changing the clock
-    slope. The correction is applied to QuTAG
+    aligned exactly. Set ``correction_mode="linear_fit"`` for a single
+    least-squares linear fit across all trigger pairs, or
+    ``correction_mode="global"`` to determine one scale from only the first
+    and last paired triggers. Set ``correction_mode="first"`` to align only
+    the first trigger from each tagger without changing the clock slope. The
+    correction is applied to QuTAG
     channels from 0 through ``qutag_channel_max``; HydraHarp channels are
-    unchanged. The returned ``t_ps`` and ``ch`` arrays are both clipped to
-    the shared recording interval: ``0 <= t_ps <=`` the duration of the
-    shorter tagger recording. ``per_trigger`` and ``global`` require at least
-    two paired trigger events; ``first`` requires only one per tagger.
+    unchanged. The shorter trigger array determines how many trigger pairs
+    are used, but the returned ``t_ps`` and ``ch`` arrays retain all supplied
+    events; they are not clipped to the shorter recording duration.
+    ``per_trigger``, ``linear_fit``, and ``global`` require at least two
+    paired trigger events; ``first`` requires only one per tagger.
     """
     t_ps = np.asarray(t_ps).ravel()
     ch = np.asarray(ch).ravel()
@@ -1679,8 +1684,10 @@ def timetag_correction(
     ch_qutag = int(ch_qutag)
     ch_hh = int(ch_hh)
     correction_mode = str(correction_mode).lower()
-    if correction_mode not in ("per_trigger", "global", "first"):
-        raise ValueError("correction_mode must be 'per_trigger', 'global', or 'first'.")
+    if correction_mode not in ("per_trigger", "linear_fit", "global", "first"):
+        raise ValueError(
+            "correction_mode must be 'per_trigger', 'linear_fit', 'global', or 'first'."
+        )
 
     if correction_mode == "first":
         qutag_trigger_timestamps = t_ps[ch == ch_qutag]
@@ -1712,7 +1719,8 @@ def timetag_correction(
         raise ValueError("At least one paired trigger event is required for timebase correction.")
     if correction_mode != "first" and pair_count < 2:
         raise ValueError(
-            "At least two paired trigger events are required for per_trigger or global correction."
+            "At least two paired trigger events are required for per_trigger, "
+            "linear_fit, or global correction."
         )
 
     qutag_trigger_pairs = qutag_trigger_timestamps[:pair_count]
@@ -1740,6 +1748,7 @@ def timetag_correction(
     corrected_t_ps = t_ps.astype(np.float64, copy=True)
     qutag_event_mask = (ch >= 0) & (ch <= int(qutag_channel_max))
     qutag_event_timestamps = corrected_t_ps[qutag_event_mask]
+    applied_time_scale = overall_time_scale
     if correction_mode == "first":
         corrected_t_ps[qutag_event_mask] = (
             qutag_event_timestamps - qutag_reference_t_ps + hydraharp_reference_t_ps
@@ -1759,35 +1768,41 @@ def timetag_correction(
             + (qutag_event_timestamps - qutag_trigger_pairs[interval_indices])
             * local_time_scales[interval_indices]
         )
-    else:
+    elif correction_mode == "linear_fit":
         elapsed_norm = np.dot(qutag_elapsed_ps, qutag_elapsed_ps)
         if elapsed_norm == 0:
             raise ValueError("QuTAG trigger timestamps do not span elapsed time.")
         time_scale = float(np.dot(qutag_elapsed_ps, hydraharp_elapsed_ps) / elapsed_norm)
+        applied_time_scale = time_scale
         corrected_t_ps[qutag_event_mask] = (
             (qutag_event_timestamps - qutag_reference_t_ps) * time_scale
             + hydraharp_reference_t_ps
         )
+    elif correction_mode == "global":
+        # Deliberately use only the first pair for the common origin and the
+        # last pair for one elapsed-time scale; intermediate pairs are ignored.
+        corrected_t_ps[qutag_event_mask] = (
+            (qutag_event_timestamps - qutag_reference_t_ps) * overall_time_scale
+            + hydraharp_reference_t_ps
+        )
 
-    # Express both taggers relative to their aligned first trigger, then keep
-    # only the interval recorded by both devices.  Channels are filtered and
-    # sorted with the timestamps so their event correspondence is preserved.
+    # Express both taggers relative to their aligned first trigger. Do not
+    # discard events based on the shorter tagger duration: trigger pairing
+    # above is count-based, and the caller may need every recorded event.
     corrected_t_ps -= hydraharp_reference_t_ps
     hydraharp_event_mask = ~qutag_event_mask
     qutag_duration_ps = float(np.max(corrected_t_ps[qutag_event_mask]))
     hydraharp_duration_ps = float(np.max(corrected_t_ps[hydraharp_event_mask]))
     shared_duration_ps = min(qutag_duration_ps, hydraharp_duration_ps)
-    shared_interval_mask = (corrected_t_ps >= 0) & (corrected_t_ps <= shared_duration_ps)
-    removed_outside_shared_interval = int(len(corrected_t_ps) - np.count_nonzero(shared_interval_mask))
-    corrected_t_ps = corrected_t_ps[shared_interval_mask]
-    corrected_ch = ch[shared_interval_mask]
+    removed_outside_shared_interval = 0
+    corrected_ch = ch.copy()
     # chronological_order = np.argsort(corrected_t_ps, kind="stable")
     # corrected_t_ps = corrected_t_ps[chronological_order]
     # corrected_ch = corrected_ch[chronological_order]
 
     correction = {
         "correction_mode": correction_mode,
-        "time_scale": overall_time_scale,
+        "time_scale": applied_time_scale,
         "local_time_scales": local_time_scales,
         "qutag_reference_t_ps": qutag_reference_t_ps,
         "hydraharp_reference_t_ps": hydraharp_reference_t_ps,
@@ -1797,18 +1812,15 @@ def timetag_correction(
         "corrected_qutag_channel_max": int(qutag_channel_max),
         "shared_duration_ps": shared_duration_ps,
         "events_removed_outside_shared_interval": removed_outside_shared_interval,
+        "timestamps_clipped_to_shared_interval": False,
     }
     print(
         "Timebase correction: "
         f"{trigger_pairs_used:,} trigger pairs used, mode={correction_mode}, "
-        f"overall QuTAG scale={overall_time_scale:.12g}, "
+        f"applied QuTAG scale={applied_time_scale:.12g}, "
         f"reference {qutag_reference_t_ps:g} ps -> {hydraharp_reference_t_ps:g} ps; "
-        f"kept 0 to {shared_duration_ps:g} ps."
+        "kept all input events."
     )
-    if removed_outside_shared_interval:
-        print(
-            f"Removed {removed_outside_shared_interval:,} event(s) outside the shared interval."
-        )
 
     if return_parameters:
         return corrected_t_ps, corrected_ch, correction
@@ -2471,8 +2483,10 @@ def _g2calib_1(x, height, center, sigma, offset):
     return offset + height * (left_term + right_term)
 
 
-_GAMMA = 732.22054
-_SIGMAG = 71.134089
+# _GAMMA = 732.22054
+# _SIGMAG = 71.134089
+_GAMMA = 800.0
+_SIGMAG = 50.0
 _A = 1.0 / (np.sqrt(2.0) * _SIGMAG)
 _B = 1.0 / _GAMMA
 _COEF1 = _GAMMA * np.exp(-_SIGMAG**2 / _GAMMA**2)

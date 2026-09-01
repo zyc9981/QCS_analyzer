@@ -21,33 +21,47 @@ from qcs_analyzer import __all__ as _QCS_ANALYZER_PUBLIC_API
 from qcs_analyzer.analysis import g2_process_time_dependent, timetag_correction, timetag_channel_time_difference
 from qcs_analyzer.io import load_timetag
 from qcs_analyzer.results import save_time_dependent_results, save_dict_npz, load_dict_npz
-from qcs_analyzer.qcs_kernal import qcs_kernal
+from qcs_analyzer.qcs_kernal import qcs_kernal, qcs_plot
 from qcs_analyzer.allan_deviation import allan_deviation_estimator, allan_deviation_estimator_tau_input
 
 __all__ = _QCS_ANALYZER_PUBLIC_API
 
 
 if __name__ == "__main__":
-    # timetag_to_h5(ch_trig_time_tagger=3, sort_by_timestamp=False)
+    # timetag_to_h5(sort_by_timestamp=False)
     # timetag_to_h5_TTXonly()
-    # trancate_timetag(60)
+    # trancate_timetag(1500)
+    # sys.exit()
 
     # results = load_g2_results()
     # fit = fit_g2(
     #     results,
     #     curve="expogaussconv",
     #     parameters={
-    #         "center": 128.520,
+    #         "center": 61.5,
     #         "height": 50,
     #         "gamma": 0.7,
     #         "sigma": 0.05,
     #         "offset": 0.01,
     #     },
-    #     fit_window=27,
+    #     fit_window=25,
     #     use_rate=50e6,
     #     show=True,
     # )
-    # print(f"sigma: {fit["parameters"]["sigma"]:.8g}", f"gamma: {fit["parameters"]["gamma"]:.8g}")
+    # print(f"sigma: {fit["parameters"]["sigma"]:.8g}", f"gamma: {fit["parameters"]["gamma"]:.8g}", f"gamma: {fit["parameters"]["center"]:.8g}")
+
+    qcs_results = load_dict_npz()
+    tau_diff = qcs_results["tau_diff"]
+    tau_diff = tau_diff - np.mean(tau_diff)
+    s = np.std(tau_diff, ddof=1)
+    print(s)
+    N = len(tau_diff)
+    se_s = s / np.sqrt(2 * (N - 1))
+    print(se_s)
+    CC = qcs_results["CC"]
+    print(np.mean(CC))
+    qcs_plot(qcs_results)
+    sys.exit()
 
     t_ps, ch, filename = load_timetag(return_filename=True)
     print(r"Data import complete.")
@@ -69,6 +83,7 @@ if __name__ == "__main__":
         ch_hh=7,
         return_parameters=True,
         # correction_mode="first",
+        # correction_mode="linear_fit",
         correction_mode="global",
         # correction_mode="per_trigger",
     )
@@ -107,28 +122,45 @@ if __name__ == "__main__":
     #     # ch_b=4,
     #     ch_b=7,
     #     # bin_s=0.1,
-    #     bin_s=0.01,
+    #     bin_s=0.0,
     #     # show=False,
     # )
+    # save_dict_npz(data_dict={"tau_diff": difference_ps})
 
-    Ta_s = 0.2
+    # from scipy.fft import fft, fftshift
+    # plt.figure()
+    # diff_ft = fft(difference_ps)
+    # plt.plot(np.linspace(0, 100e3, np.size(difference_ps)), diff_ft)
+    # plt.show()
+
+    # tau_diff = difference_ps
+    # from scipy.signal import correlate
+    # x = tau_diff - np.mean(tau_diff)
+    # acf = correlate(x, x, mode="full")
+    # acf = acf[len(acf)//2:]
+    # acf = acf / acf[0]
+    # plt.figure()
+    # plt.plot(acf[:50000])
+    # plt.show()
+
+    Ta_s = 5.0
     qcs_result = qcs_kernal(
         t_ps,
         ch,
 
         Ta_s_init=Ta_s,
-        tau_ps_init=112390,
-        tau_rt_ps_init=57460,
+        tau_ps_init=61500,
+        tau_rt_ps_init=61500,
 
         fit_curve="g2calib_2",
         time_bin_ps_init=200,
-        Ta_s_max=5,
-        # Ta_s_max=Ta_s,
+        # Ta_s_max=10,
+        Ta_s_max=Ta_s,
         # tau_span_ps_init=120e3,
 
         Ta_ref_s=0.1,
         # show_fit=True,
-        second_order_fit=True,
+        # second_order_fit=True,
 
         Freq = 50e6,
     )
@@ -161,11 +193,11 @@ if __name__ == "__main__":
     # results = g2_process(
     #     t_ps,
     #     ch,
-    #     t_center=112.4,
-    #     # t_center=50,
+    #     # t_center=112.4,
+    #     t_center=62.15,
     #     # t_center=24601.2,
-    #     t_stop=20,
-    #     t_span=200,
+    #     # t_stop=600,
+    #     t_span=20,
     #     time_bin=0.02,
     #     # time_bin=2,
     #     sig_half=5.0,
