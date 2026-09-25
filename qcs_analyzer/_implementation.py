@@ -50,7 +50,9 @@ DEFAULT_FILE_DIALOG_DIRECTORY = Path(
     # r"C:\Yichi Zhang\QCS\20260818_TwoWay_2tagger_test"
     # r"C:\Yichi Zhang\QCS\20260821_TwoWay_2tagger_TTXandHH"
     # r"C:\Yichi Zhang\QCS\20260825_TwoWay_2tagger_TTXandHH"
-    r"C:\Yichi Zhang\QCS\20260831_OneWay_2tagger_TTXandHH"
+    # r"C:\Yichi Zhang\QCS\20260831_OneWay_2tagger_TTXandHH"
+    # r"C:\Yichi Zhang\QCS\20260917_TwoWay_2taggerRb"
+    r"C:\Yichi Zhang\QCS\20260924_Tx1_RB4_Characterization"
 )
 
 TIMETAG_SOURCE_FILETYPES = [
@@ -1016,7 +1018,7 @@ def timetag_to_h5_TTXonly(
 
     if output_filename is None:
         output_filename = str(
-            time_tagger_path.with_name(f"{time_tagger_path.stem}_TTXonly.h5")
+            time_tagger_path.with_name(f"{time_tagger_path.stem}.h5")
         )
 
     print(f"Time Tagger X input: {time_tagger_path}")
@@ -1671,8 +1673,9 @@ def timetag_correction(
     correction is applied to QuTAG
     channels from 0 through ``qutag_channel_max``; HydraHarp channels are
     unchanged. The shorter trigger array determines how many trigger pairs
-    are used, but the returned ``t_ps`` and ``ch`` arrays retain all supplied
-    events; they are not clipped to the shorter recording duration.
+    are used. In ``global`` mode, the returned ``t_ps`` and ``ch`` arrays are
+    limited to the corrected time interval shared by both taggers. The other
+    correction modes retain all supplied events.
     ``per_trigger``, ``linear_fit``, and ``global`` require at least two
     paired trigger events; ``first`` requires only one per tagger.
     """
@@ -1786,16 +1789,27 @@ def timetag_correction(
             + hydraharp_reference_t_ps
         )
 
-    # Express both taggers relative to their aligned first trigger. Do not
-    # discard events based on the shorter tagger duration: trigger pairing
-    # above is count-based, and the caller may need every recorded event.
+    # Express both taggers relative to their aligned first trigger.
     corrected_t_ps -= hydraharp_reference_t_ps
     hydraharp_event_mask = ~qutag_event_mask
     qutag_duration_ps = float(np.max(corrected_t_ps[qutag_event_mask]))
     hydraharp_duration_ps = float(np.max(corrected_t_ps[hydraharp_event_mask]))
     shared_duration_ps = min(qutag_duration_ps, hydraharp_duration_ps)
-    removed_outside_shared_interval = 0
-    corrected_ch = ch.copy()
+    if correction_mode == "global":
+        # A global mapping uses the first and last matched trigger pair.  Do
+        # not extrapolate either tagger past the common corrected recording
+        # interval; doing so can leave unmatched reference pulses at the tail.
+        shared_interval_mask = (
+            (corrected_t_ps >= 0.0) & (corrected_t_ps <= shared_duration_ps)
+        )
+        removed_outside_shared_interval = int(
+            len(corrected_t_ps) - np.count_nonzero(shared_interval_mask)
+        )
+        corrected_t_ps = corrected_t_ps[shared_interval_mask]
+        corrected_ch = ch[shared_interval_mask].copy()
+    else:
+        removed_outside_shared_interval = 0
+        corrected_ch = ch.copy()
     # chronological_order = np.argsort(corrected_t_ps, kind="stable")
     # corrected_t_ps = corrected_t_ps[chronological_order]
     # corrected_ch = corrected_ch[chronological_order]
@@ -1819,7 +1833,12 @@ def timetag_correction(
         f"{trigger_pairs_used:,} trigger pairs used, mode={correction_mode}, "
         f"applied QuTAG scale={applied_time_scale:.12g}, "
         f"reference {qutag_reference_t_ps:g} ps -> {hydraharp_reference_t_ps:g} ps; "
-        "kept all input events."
+        + (
+            f"removed {removed_outside_shared_interval:,} events outside the "
+            "shared interval."
+            if correction_mode == "global"
+            else "kept all input events."
+        )
     )
 
     if return_parameters:
@@ -2485,8 +2504,8 @@ def _g2calib_1(x, height, center, sigma, offset):
 
 # _GAMMA = 732.22054
 # _SIGMAG = 71.134089
-_GAMMA = 800.0
-_SIGMAG = 50.0
+_GAMMA = 61.676
+_SIGMAG = 33.417
 _A = 1.0 / (np.sqrt(2.0) * _SIGMAG)
 _B = 1.0 / _GAMMA
 _COEF1 = _GAMMA * np.exp(-_SIGMAG**2 / _GAMMA**2)
@@ -2791,7 +2810,7 @@ def fit_g2(results, curve, parameters, *, fit_window=None, use_rate=True, show=T
         ax.set_xlabel(f"Time Delay t{results['chB']} - t{results['chA']} (ns)")
         ax.set_ylabel(y_label)
         ax.grid(True)
-        ax.legend()
+        ax.legend(["Data", "Fitting"])
         fit_results["figure"] = fig
         fit_results["axis"] = ax
         plt.show()

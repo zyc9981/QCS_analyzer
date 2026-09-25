@@ -12,7 +12,8 @@ def u0_estimator(t_ref_0, t_ref_1):
 def qcs_ref_estimator(
     tau,
     t,
-    order=5,
+    # order=5,
+    order=1,
     N_sample=None,
     t_eval_ps=None,
 ):
@@ -75,8 +76,8 @@ def qcs_kernal(
     ch_ref_0=3,
     ch_ref_1=7,
 
-    tau_ps_init=115535,
-    tau_rt_ps_init=56793,
+    tau_ps_init=61470,
+    tau_rt_ps_init=107407,
     Ta_s_init=0.1,
     tau_span_ps_init=40e3,
     u0_init = 0.0,

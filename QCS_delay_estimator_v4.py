@@ -30,7 +30,7 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 if __name__ == "__main__":
     # timetag_to_h5(sort_by_timestamp=False)
     # timetag_to_h5_TTXonly()
-    # trancate_timetag(1500)
+    # trancate_timetag(1200)
     # sys.exit()
 
     # results = load_g2_results()
@@ -38,30 +38,46 @@ if __name__ == "__main__":
     #     results,
     #     curve="expogaussconv",
     #     parameters={
-    #         "center": 61.5,
-    #         "height": 50,
-    #         "gamma": 0.7,
-    #         "sigma": 0.05,
-    #         "offset": 0.01,
+    #         "center": 45.75,
+    #         "height": 100,
+    #         "gamma": 0.1,
+    #         "sigma": 0.02,
+    #         "offset": 0.1,
     #     },
-    #     fit_window=25,
+    #     fit_window=8,
     #     use_rate=50e6,
     #     show=True,
     # )
-    # print(f"sigma: {fit["parameters"]["sigma"]:.8g}", f"gamma: {fit["parameters"]["gamma"]:.8g}", f"gamma: {fit["parameters"]["center"]:.8g}")
+    # print(f"sigma: {fit["parameters"]["sigma"]:.8g}", f"gamma: {fit["parameters"]["gamma"]:.8g}", f"center: {fit["parameters"]["center"]:.8g}")
+    # sys.exit()
+    # fit = fit_g2(
+    #     results,
+    #     curve="gaussian",
+    #     parameters={
+    #         "center": -0.02,
+    #         "height": 30000,
+    #         "sigma": 0.002,
+    #         "offset": 0.0,
+    #     },
+    #     fit_window=8,
+    #     use_rate=50e6,
+    #     show=True,
+    # )
+    # print(f"sigma: {fit["parameters"]["sigma"]:.8g}")
+    # sys.exit()
 
-    qcs_results = load_dict_npz()
-    tau_diff = qcs_results["tau_diff"]
-    tau_diff = tau_diff - np.mean(tau_diff)
-    s = np.std(tau_diff, ddof=1)
-    print(s)
-    N = len(tau_diff)
-    se_s = s / np.sqrt(2 * (N - 1))
-    print(se_s)
-    CC = qcs_results["CC"]
-    print(np.mean(CC))
-    qcs_plot(qcs_results)
-    sys.exit()
+    # qcs_results = load_dict_npz()
+    # tau_diff = qcs_results["tau_diff"]
+    # tau_diff = tau_diff - np.mean(tau_diff)
+    # s = np.std(tau_diff, ddof=1)
+    # print(s)
+    # N = len(tau_diff)
+    # se_s = s / np.sqrt(2 * (N - 1))
+    # print(se_s)
+    # CC = qcs_results["CC"]
+    # print(np.mean(CC))
+    # qcs_plot(qcs_results)
+    # sys.exit()
 
     t_ps, ch, filename = load_timetag(return_filename=True)
     print(r"Data import complete.")
@@ -143,22 +159,24 @@ if __name__ == "__main__":
     # plt.plot(acf[:50000])
     # plt.show()
 
-    Ta_s = 5.0
+    Ta_s = 1.0
     qcs_result = qcs_kernal(
         t_ps,
         ch,
 
         Ta_s_init=Ta_s,
-        tau_ps_init=61500,
-        tau_rt_ps_init=61500,
+        tau_ps_init=62200,
+        # tau_ps_init=112100,
+        tau_rt_ps_init=107400,
 
         fit_curve="g2calib_2",
-        time_bin_ps_init=200,
+        time_bin_ps_init=100,
         # Ta_s_max=10,
         Ta_s_max=Ta_s,
         # tau_span_ps_init=120e3,
 
-        Ta_ref_s=0.1,
+        # Ta_ref_s=0.1,
+        Ta_ref_s=Ta_s,
         # show_fit=True,
         # second_order_fit=True,
 
@@ -188,61 +206,27 @@ if __name__ == "__main__":
     # fig1.tight_layout()
     # plt.show()
 
-    # sys.exit()
+    sys.exit()
 
-    # results = g2_process(
-    #     t_ps,
-    #     ch,
-    #     # t_center=112.4,
-    #     t_center=62.15,
-    #     # t_center=24601.2,
-    #     # t_stop=600,
-    #     t_span=20,
-    #     time_bin=0.02,
-    #     # time_bin=2,
-    #     sig_half=5.0,
-    #     freq=50e6,
-    #     chA=1,
-    #     chB=6,
-    #     filename=filename,
-    # )
-    # g2_plot(results=results)
+    results = g2_process(
+        t_ps,
+        ch,
+        t_center=107.4,
+        # t_center=62.2,
+        # t_center=45.75,
+        # t_center=-0.025,
+        # t_stop=600,
+        t_span=10,
+        time_bin=0.01,
+        # time_bin=2,
+        sig_half=5.0,
+        freq=50e6,
+        chA=1,
+        chB=2,
+        # chB=4,
+        filename=filename,
+    )
+    g2_plot(results=results)
     # save_g2_results(results)
-
-    # time_dependent_results = g2_process_time_dependent(
-    #     t_ps,
-    #     ch,
-    #     t_stop_start=0.1,
-    #     t_stop_stop=3600,
-    #     t_stop_step=0.1,
-    #     # fit_curve="expogaussconv",
-    #     fit_curve="g2calib_1",
-    #     fit_parameters={
-    #         "height": 40 / 0.1,
-    #         # "gamma": 0.7,
-    #         "sigma": 0.2,
-    #         "offset": 0.01,
-    #     },
-    #     # t_center=4.4,
-    #     t_center=24601.8,
-    #     t_span=80,
-    #     # time_bin=0.05,
-    #     time_bin=0.5,
-    #     sig_half=5.0,
-    #     fit_window=50.0,
-    #     adaptive_t_center=True,
-    #     display_values=(
-    #         "center",
-    #         "fwhm",
-    #         # "center_uncertainty",
-    #         # "fwhm_uncertainty",
-    #         "coincidences",
-    #     ),
-    #     freq=100e6,
-    #     chA=1,
-    #     chB=6,
-    #     # show_fit=True,
-    # )
-    # save_time_dependent_results(time_dependent_results)
 
     # load_time_dependent_results()
