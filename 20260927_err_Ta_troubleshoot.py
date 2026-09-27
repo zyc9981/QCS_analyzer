@@ -28,10 +28,16 @@ def plot_result(filename):
     axes[1].set_ylabel(r"$\tau_{rt} - \langle\tau_{rt}\rangle$ (ps)")
     axes[1].grid(True)
     
+# files = [
+#     r"C:\Yichi Zhang\QCS\20260924_Tx1_RB4_Characterization\011_50MHz_1200s_truncated_560s\troubleshooting\1s_both.npz",
+#     r"C:\Yichi Zhang\QCS\20260924_Tx1_RB4_Characterization\011_50MHz_1200s_truncated_560s\troubleshooting\2s_both.npz",
+#     r"C:\Yichi Zhang\QCS\20260924_Tx1_RB4_Characterization\011_50MHz_1200s_truncated_560s\troubleshooting\3s_both.npz",
+# ]
 files = [
     r"C:\Yichi Zhang\QCS\20260924_Tx1_RB4_Characterization\011_50MHz_1200s_truncated_560s\troubleshooting\1s_both.npz",
-    r"C:\Yichi Zhang\QCS\20260924_Tx1_RB4_Characterization\011_50MHz_1200s_truncated_560s\troubleshooting\2s_both.npz",
-    r"C:\Yichi Zhang\QCS\20260924_Tx1_RB4_Characterization\011_50MHz_1200s_truncated_560s\troubleshooting\3s_both.npz",
+    r"C:\Yichi Zhang\QCS\20260924_Tx1_RB4_Characterization\011_50MHz_1200s_truncated_560s\troubleshooting\5s_both_binfixed.npz",
+    r"C:\Yichi Zhang\QCS\20260924_Tx1_RB4_Characterization\011_50MHz_1200s_truncated_560s\troubleshooting\10s_both_binfixed.npz",
+    r"C:\Yichi Zhang\QCS\20260924_Tx1_RB4_Characterization\011_50MHz_1200s_truncated_560s\troubleshooting\20s_both_binfixed.npz",
 ]
 
 for file in files:

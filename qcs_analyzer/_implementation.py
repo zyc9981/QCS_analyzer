@@ -2670,7 +2670,8 @@ def fit_g2(results, curve, parameters, *, fit_window=None, use_rate=True, show=T
     use_rate : bool, optional
         Fit coincidence rate instead of raw histogram counts.
     show : bool, optional
-        Create and display a data/fit figure.
+        Create and display a data/fit figure. When False, the returned
+        ``x_fit`` and ``y_fit`` are None; display-curve sampling is skipped.
     """
     if curve_fit is None:
         raise ImportError("scipy is required for g2 fitting. Install scipy to use fit_g2().")
@@ -2781,13 +2782,6 @@ def fit_g2(results, curve, parameters, *, fit_window=None, use_rate=True, show=T
     fwhm = fwhm_factor * abs(fitted_parameters[definition["scale_parameter"]])
     fwhm_uncertainty = fwhm_factor * parameter_uncertainties[definition["scale_parameter"]]
 
-    # x_fit = np.linspace(float(np.min(x_fit_data)), float(np.max(x_fit_data)), 1000)
-    x_fit = np.arange(
-        float(np.min(x_fit_data)),
-        float(np.max(x_fit_data)),
-        0.01,
-    )
-    y_fit = definition["function"](x_fit, *popt)
     fit_results = {
         "curve": curve_key,
         "parameters": fitted_parameters,
@@ -2798,8 +2792,8 @@ def fit_g2(results, curve, parameters, *, fit_window=None, use_rate=True, show=T
         "success": fit_succeeded,
         "message": fit_message,
         "used_initial_parameters": not fit_succeeded,
-        "x_fit": x_fit,
-        "y_fit": y_fit,
+        "x_fit": None,
+        "y_fit": None,
         **fitted_parameters,
         **{f"{name}_uncertainty": value for name, value in parameter_uncertainties.items()},
     }
@@ -2811,6 +2805,15 @@ def fit_g2(results, curve, parameters, *, fit_window=None, use_rate=True, show=T
     # print(f"FWHM: {fwhm:.6g}")
 
     if show:
+        # Sample the display curve only when a plot is requested.
+        x_fit = np.arange(
+            float(np.min(x_fit_data)),
+            float(np.max(x_fit_data)),
+            0.01,
+        )
+        y_fit = definition["function"](x_fit, *popt)
+        fit_results["x_fit"] = x_fit
+        fit_results["y_fit"] = y_fit
         fig, ax = plt.subplots()
         ax.plot(centers, y_data, ".", label="Data")
         fit_label = (

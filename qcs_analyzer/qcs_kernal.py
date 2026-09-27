@@ -1,6 +1,8 @@
 from qcs_analyzer._implementation import *
 import numpy as np
+from numba import njit
 import matplotlib.pyplot as plt
+import time
 
 
 def u0_estimator(t_ref_0, t_ref_1):
@@ -67,6 +69,115 @@ def qcs_ref_estimator2(
     return tau_at_point, np.std(tau - tau_at_point), N_sample
 
 
+def g2_histogram_numba(
+    acquisition_a,
+    acquisition_b,
+    edges,
+    *,
+    Ta_s,
+    chA,
+    chB,
+    time_bin_ps_init,
+):
+    """
+    Build a coincidence histogram and return a fit_g2-compatible dictionary.
+
+    Requirements:
+        - Acquisitions are sorted, finite, 1-D NumPy timestamp arrays.
+        - Timestamps and edges use picoseconds.
+        - Edges are uniformly spaced.
+        - Bins include their lower edge and exclude their upper edge.
+    """
+    acquisition_a = np.asarray(acquisition_a)
+    acquisition_b = np.asarray(acquisition_b)
+    edges = np.asarray(edges, dtype=np.float64)
+
+    if acquisition_a.ndim != 1 or acquisition_b.ndim != 1:
+        raise ValueError("Acquisitions must be one-dimensional.")
+
+    if edges.ndim != 1 or len(edges) < 2:
+        raise ValueError("edges must contain at least two boundaries.")
+
+    widths = np.diff(edges)
+    time_bin_ps = widths[0]
+
+    if (
+        not np.all(np.isfinite(edges))
+        or np.any(widths <= 0)
+        or not np.allclose(widths, time_bin_ps, rtol=1e-8, atol=0)
+    ):
+        raise ValueError("edges must be finite, increasing, and uniform.")
+
+    if not np.isfinite(Ta_s) or Ta_s <= 0:
+        raise ValueError("Ta_s must be finite and positive.")
+
+    if not np.isfinite(time_bin_ps_init) or time_bin_ps_init <= 0:
+        raise ValueError("time_bin_ps_init must be finite and positive.")
+
+    # Create the compiled helper once, then reuse it on subsequent calls.
+    if not hasattr(g2_histogram_numba, "_count_pairs"):
+
+        @njit(fastmath=False)
+        def count_pairs(t_a, t_b, bin_edges):
+            n_bins = len(bin_edges) - 1
+            bin_width = bin_edges[1] - bin_edges[0]
+            lower = bin_edges[0]
+            upper = bin_edges[-1]
+
+            counts = np.zeros(n_bins, dtype=np.int64)
+            n_b = len(t_b)
+            j_start = 0
+
+            for i in range(len(t_a)):
+                timestamp_a = t_a[i]
+
+                while j_start < n_b:
+                    if t_b[j_start] - timestamp_a >= lower:
+                        break
+                    j_start += 1
+
+                if j_start == n_b:
+                    break
+
+                j = j_start
+                while j < n_b:
+                    delay = t_b[j] - timestamp_a
+
+                    if delay >= upper:
+                        break
+
+                    k = int(np.floor((delay - lower) / bin_width))
+
+                    # Resolve floating-point rounding at bin boundaries.
+                    k = min(max(k, 0), n_bins - 1)
+
+                    while k > 0 and delay < bin_edges[k]:
+                        k -= 1
+                    while k < n_bins - 1 and delay >= bin_edges[k + 1]:
+                        k += 1
+
+                    counts[k] += 1
+                    j += 1
+
+            return counts
+
+        g2_histogram_numba._count_pairs = count_pairs
+
+    counts = g2_histogram_numba._count_pairs(
+        acquisition_a, acquisition_b, edges
+    )
+    centers = edges[:-1] + widths / 2.0
+
+    return {
+        "centers": centers.copy(),
+        "histogram": counts / time_bin_ps * time_bin_ps_init,
+        "histogram_raw": counts.copy(),
+        "T_acq_s": float(Ta_s),
+        "chA": chA,
+        "chB": chB,
+    }
+
+
 def qcs_kernal(
     t_ps,
     ch,
@@ -81,7 +192,7 @@ def qcs_kernal(
     Ta_s_init=0.1,
     tau_span_ps_init=40e3,
     u0_init = 0.0,
-    time_bin_ps_init=500,
+    time_bin_ps_init=200,
     Ta_ref_s=0.1,
 
     Ta_s_max=1,
@@ -144,8 +255,8 @@ def qcs_kernal(
         "tau_ps": float(tau_ps_init),
         "tau_rt_ps": float(tau_rt_ps_init),
         "epsilon_ps": float(0.0),
-        "tau_span_ps": float(tau_span_ps_init),
-        # "tau_span_ps": np.rint(float(1e12)/Freq) * 1.6,
+        # "tau_span_ps": float(tau_span_ps_init),
+        "tau_span_ps": np.rint(float(1e12)/Freq) * 1.6,
         "u0": float(u0_init),
         "T_lastmid_ps": float(0.0),
         "T_lastu0_ps": float(0.0),
@@ -204,6 +315,8 @@ def qcs_kernal(
     index_ref = 0
 
     while window_start_ps < recording_end_ps:
+        cpu_time_start = time.time()
+
         Ta_s = state["Ta_s"]
         Ta_rt_s = state["Ta_rt_s"]
 
@@ -301,6 +414,8 @@ def qcs_kernal(
         tau_predicted_ps = state["tau_ps"] + (acquisition["point_ps"] - state["T_lastmid_ps"]) * state["u0"]
         t_lo = tau_predicted_ps - state["tau_span_ps"] * 0.5
         t_hi = tau_predicted_ps + state["tau_span_ps"] * 0.5
+        t_lo = tau_ps_init - state["tau_span_ps"] * 0.5
+        t_hi = tau_ps_init + state["tau_span_ps"] * 0.5
         time_bin_ps = state["time_bin_ps"]
         edges = np.arange(t_lo, t_hi + time_bin_ps, time_bin_ps)
         if len(edges) < 2:
@@ -308,38 +423,50 @@ def qcs_kernal(
         centers = edges[:-1] + time_bin_ps / 2
         start_stop_results = np.zeros(len(centers), dtype=np.int64)
 
-        j_start = 0
-        for t_i in acquisition_t_0:
-            while j_start < len(acquisition_t_1) and (acquisition_t_1[j_start] - t_i) < t_lo:
-                j_start += 1
+        # j_start = 0
+        # for t_i in acquisition_t_0:
+        #     while j_start < len(acquisition_t_1) and (acquisition_t_1[j_start] - t_i) < t_lo:
+        #         j_start += 1
     
-            j = j_start
-            while j < len(acquisition_t_1):
-                dt = acquisition_t_1[j] - t_i
+        #     j = j_start
+        #     while j < len(acquisition_t_1):
+        #         dt = acquisition_t_1[j] - t_i
     
-                if dt > t_hi:
-                    break
+        #         if dt > t_hi:
+        #             break
     
-                kbin = int(np.floor((dt - t_lo) / time_bin_ps))
-                if 0 <= kbin < len(start_stop_results):
-                    start_stop_results[kbin] += 1
-                    # numPairs += 1
+        #         kbin = int(np.floor((dt - t_lo) / time_bin_ps))
+        #         if 0 <= kbin < len(start_stop_results):
+        #             start_stop_results[kbin] += 1
+        #             # numPairs += 1
     
-                j += 1
+        #         j += 1
         
-        results = {
-            "centers": centers.copy(),
-            "histogram": start_stop_results.copy() / state["time_bin_ps"] * time_bin_ps_init,
-            "histogram_raw": start_stop_results.copy(),
-            "T_acq_s": Ta_s,
-            "chA": ch_0,
-            "chB": ch_1,
-        }
+        # results = {
+        #     "centers": centers.copy(),
+        #     "histogram": start_stop_results.copy() / state["time_bin_ps"] * time_bin_ps_init,
+        #     "histogram_raw": start_stop_results.copy(),
+        #     "T_acq_s": Ta_s,
+        #     "chA": ch_0,
+        #     "chB": ch_1,
+        # }
+
+        results = g2_histogram_numba(
+            acquisition_t_0,
+            acquisition_t_1,
+            edges,
+            Ta_s=Ta_s,
+            chA=ch_0,
+            chB=ch_1,
+            time_bin_ps_init=time_bin_ps_init,
+        )
 
         if flag_rt == True:
             tau_rt_predicted_ps = state["tau_rt_ps"]
-            t_lo_rt = tau_rt_predicted_ps - state["tau_span_ps"] * 0.5
-            t_hi_rt = tau_rt_predicted_ps + state["tau_span_ps"] * 0.5
+            # t_lo_rt = tau_rt_predicted_ps - state["tau_span_ps"] * 0.5
+            # t_hi_rt = tau_rt_predicted_ps + state["tau_span_ps"] * 0.5
+            t_lo_rt = tau_rt_ps_init - state["tau_span_ps"] * 0.5
+            t_hi_rt = tau_rt_ps_init + state["tau_span_ps"] * 0.5
             time_bin_rt_ps = state["time_bin_rt_ps"]
             edges_rt = np.arange(t_lo_rt, t_hi_rt + time_bin_rt_ps, time_bin_rt_ps)
             if len(edges_rt) < 2:
@@ -347,33 +474,43 @@ def qcs_kernal(
             centers_rt = edges_rt[:-1] + time_bin_rt_ps / 2
             start_stop_results_rt = np.zeros(len(centers_rt), dtype=np.int64)
 
-            j_start = 0
-            for t_i in acquisition_t_0rt:
-                while j_start < len(acquisition_t_2) and (acquisition_t_2[j_start] - t_i) < t_lo_rt:
-                    j_start += 1
+            # j_start = 0
+            # for t_i in acquisition_t_0rt:
+            #     while j_start < len(acquisition_t_2) and (acquisition_t_2[j_start] - t_i) < t_lo_rt:
+            #         j_start += 1
         
-                j = j_start
-                while j < len(acquisition_t_2):
-                    dt = acquisition_t_2[j] - t_i
+            #     j = j_start
+            #     while j < len(acquisition_t_2):
+            #         dt = acquisition_t_2[j] - t_i
         
-                    if dt > t_hi_rt:
-                        break
+            #         if dt > t_hi_rt:
+            #             break
         
-                    kbin = int(np.floor((dt - t_lo_rt) / time_bin_rt_ps))
-                    if 0 <= kbin < len(start_stop_results_rt):
-                        start_stop_results_rt[kbin] += 1
-                        # numPairs += 1
+            #         kbin = int(np.floor((dt - t_lo_rt) / time_bin_rt_ps))
+            #         if 0 <= kbin < len(start_stop_results_rt):
+            #             start_stop_results_rt[kbin] += 1
+            #             # numPairs += 1
         
-                    j += 1
+            #         j += 1
             
-            results_rt = {
-                "centers": centers_rt.copy(),
-                "histogram": start_stop_results_rt.copy() / state["time_bin_rt_ps"] * time_bin_ps_init,
-                "histogram_raw": start_stop_results_rt.copy(),
-                "T_acq_s": Ta_rt_s,
-                "chA": ch_0,
-                "chB": ch_2,
-            }
+            # results_rt = {
+            #     "centers": centers_rt.copy(),
+            #     "histogram": start_stop_results_rt.copy() / state["time_bin_rt_ps"] * time_bin_ps_init,
+            #     "histogram_raw": start_stop_results_rt.copy(),
+            #     "T_acq_s": Ta_rt_s,
+            #     "chA": ch_0,
+            #     "chB": ch_2,
+            # }
+
+            results_rt = g2_histogram_numba(
+                acquisition_t_0rt,
+                acquisition_t_2,
+                edges_rt,
+                Ta_s=Ta_rt_s,
+                chA=ch_0,
+                chB=ch_2,
+                time_bin_ps_init=time_bin_ps_init,
+            )
 
         # ------------------------------------------------------------
         # STEP 3:
@@ -390,7 +527,7 @@ def qcs_kernal(
                 curve=fit_curve,
                 parameters=fit_parameters,
                 # fit_window=state["tau_span_ps"],
-                fit_window=np.rint(float(1e12)/Freq) * 1.5,
+                fit_window=np.rint(float(1e12)/Freq) * 1.2,
                 show=show_fit,
             )
 
@@ -416,7 +553,7 @@ def qcs_kernal(
                     curve=fit_curve,
                     parameters=fit_parameters,
                     # fit_window=state["tau_span_ps"],
-                    fit_window=np.rint(float(1e12)/Freq) * 1.6,
+                    fit_window=np.rint(float(1e12)/Freq) * 1.2,
                     show=show_fit,
                     # show=True,
                 )
@@ -506,9 +643,10 @@ def qcs_kernal(
                 Ta_rt_s = np.round((fwhm_calib_ps / 10 / np.abs(udrift_rt) * 1e-12) / Ta_s_init) * Ta_s_init
                 Ta_rt_s = np.min([Ta_rt_s, Ta_rt_s_max])
                 # state["Ta_rt_s"] = np.max([Ta_s_init, Ta_rt_s])
-                state["Ta_rt_s"] = Ta_rt_s
-                time_bin_rt_ps = round(time_bin_ps_init / state["Ta_rt_s"] * Ta_s_init / 10.0) * 10.0
-                state["time_bin_rt_ps"] = np.max([time_bin_rt_ps, time_bin_ps_min])
+                # state["Ta_rt_s"] = Ta_rt_s
+                state["Ta_rt_s"] = state["Ta_s"]
+                # time_bin_rt_ps = round(time_bin_ps_init / state["Ta_rt_s"] * Ta_s_init / 10.0) * 10.0
+                # state["time_bin_rt_ps"] = np.max([time_bin_rt_ps, time_bin_ps_min])
     
                 # print(f"Ta_rt_s: {state["Ta_rt_s"]:.2f}")
             else:
@@ -526,6 +664,9 @@ def qcs_kernal(
         # index_ref = end_index_ref
         window_start_ps = window_end_ps
         flag_rt = False
+
+        cpu_time_end = time.time()
+        print(f"Acquisition {acquisition_index} processed in {cpu_time_end - cpu_time_start:.4f} seconds.")
 
     # ------------------------------------------------------------
     # After scan: plot results

@@ -30,7 +30,7 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 if __name__ == "__main__":
     # timetag_to_h5(sort_by_timestamp=False)
     # timetag_to_h5_TTXonly()
-    # trancate_timetag(560)
+    # trancate_timetag(60)
     # sys.exit()
 
     # results = load_g2_results()
@@ -114,7 +114,7 @@ if __name__ == "__main__":
         # correction_mode="per_trigger",
     )
 
-    Ta_s = 1.0
+    Ta_s = 30.0
     qcs_result = qcs_kernal(
         t_ps,
         ch,
