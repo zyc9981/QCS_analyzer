@@ -30,7 +30,7 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 if __name__ == "__main__":
     # timetag_to_h5(sort_by_timestamp=False)
     # timetag_to_h5_TTXonly()
-    # trancate_timetag(1200)
+    # trancate_timetag(560)
     # sys.exit()
 
     # results = load_g2_results()
@@ -68,12 +68,22 @@ if __name__ == "__main__":
 
     # qcs_results = load_dict_npz()
     # tau_diff = qcs_results["tau_diff"]
+    # tau_rt = qcs_results["tau_rt"]
+    # t = qcs_results["center"]
+    # mask = (t < 480e12) & np.isfinite(tau_diff)
     # tau_diff = tau_diff - np.mean(tau_diff)
-    # s = np.std(tau_diff, ddof=1)
-    # print(s)
+    # tau_diff = tau_diff[mask]
+    # tau_rt = tau_rt - np.mean(tau_rt)
+    # tau_rt = tau_rt[mask]
+    # s1 = np.std(tau_diff, ddof=1)
+    # s2 = np.std(tau_rt, ddof=1)
+    # print("error_diff:", s1)
+    # print("error_rt:", s2)
     # N = len(tau_diff)
-    # se_s = s / np.sqrt(2 * (N - 1))
-    # print(se_s)
+    # se_s1 = s1 / np.sqrt(2 * (N - 1))
+    # print(se_s1)
+    # se_s2 = s2 / np.sqrt(2 * (N - 1))
+    # print(se_s2)
     # CC = qcs_results["CC"]
     # print(np.mean(CC))
     # qcs_plot(qcs_results)
@@ -103,61 +113,6 @@ if __name__ == "__main__":
         correction_mode="global",
         # correction_mode="per_trigger",
     )
-    
-    # t_ps0 = t_ps[ch==3]
-    # t_ps = t_ps - t_ps0[0]
-
-    # t_ps0 = t_ps[ch==3]
-    # t_psA = t_ps0
-    # # print((t_psA[-1] - t_psA[0])*1e-12)
-    # # t_ps1 = t_ps0
-    # t_ps0 = np.asarray(t_ps0, dtype=float)
-    # slope_ps_per_sample = (t_ps0[-1] - t_ps0[0]) / (len(t_ps0) - 1)
-    # t_ps1 = t_ps0 - slope_ps_per_sample * np.arange(len(t_ps0))
-    # t_ps0 = t_ps[ch==7]
-    # t_psB = t_ps0
-    # # print((t_psB[-1] - t_psB[0])*1e-12)
-    # # t_ps2 = t_ps0
-    # t_ps0 = np.asarray(t_ps0, dtype=float)
-    # slope_ps_per_sample = (t_ps0[-1] - t_ps0[0]) / (len(t_ps0) - 1)
-    # t_ps2 = t_ps0 - slope_ps_per_sample * np.arange(len(t_ps0))
-    # nidx = np.min([np.size(t_psA), np.size(t_psB)])
-    # dt_ps = t_psA[:nidx] - t_psB[:nidx]
-    # fig, ax = plt.subplots()
-    # ax.plot(np.arange(np.size(t_ps1)) * 1e-5, t_ps1, label="t_ps1")
-    # ax.plot(np.arange(np.size(t_ps2)) * 1e-5, t_ps2 + 1000, label="t_ps2")
-    # ax.legend()
-    # # fig, ax = plt.subplots()
-    # # ax.plot(np.arange(nidx) * 1e-5, dt_ps)
-    # # plt.show()
-
-    # difference_ps, t_a, t_b, figure, axis = timetag_channel_time_difference(
-    #     t_ps, ch,
-    #     # ch_a=3,
-    #     ch_a=3,
-    #     # ch_b=4,
-    #     ch_b=7,
-    #     # bin_s=0.1,
-    #     bin_s=0.0,
-    #     # show=False,
-    # )
-    # save_dict_npz(data_dict={"tau_diff": difference_ps})
-
-    # from scipy.fft import fft, fftshift
-    # plt.figure()
-    # diff_ft = fft(difference_ps)
-    # plt.plot(np.linspace(0, 100e3, np.size(difference_ps)), diff_ft)
-    # plt.show()
-
-    # tau_diff = difference_ps
-    # from scipy.signal import correlate
-    # x = tau_diff - np.mean(tau_diff)
-    # acf = correlate(x, x, mode="full")
-    # acf = acf[len(acf)//2:]
-    # acf = acf / acf[0]
-    # plt.figure()
-    # plt.plot(acf[:50000])
-    # plt.show()
 
     Ta_s = 1.0
     qcs_result = qcs_kernal(
@@ -170,7 +125,8 @@ if __name__ == "__main__":
         tau_rt_ps_init=107400,
 
         fit_curve="g2calib_2",
-        time_bin_ps_init=100,
+        # time_bin_ps_init=100,
+        time_bin_ps_init=20,
         # Ta_s_max=10,
         Ta_s_max=Ta_s,
         # tau_span_ps_init=120e3,
@@ -179,6 +135,8 @@ if __name__ == "__main__":
         Ta_ref_s=Ta_s,
         # show_fit=True,
         # second_order_fit=True,
+
+        Ta_rt_s_max=Ta_s,
 
         Freq = 50e6,
     )

@@ -2753,6 +2753,13 @@ def fit_g2(results, curve, parameters, *, fit_window=None, use_rate=True, show=T
             y_fit_data,
             p0=p0,
             bounds=(lower_bounds, upper_bounds),
+
+            # method="trf",
+            # ftol=1e-12,
+            # xtol=1e-12,
+            # gtol=1e-12,
+            # x_scale="jac",
+            # max_nfev=10000,
         )
         fit_succeeded = True
         fit_message = None
@@ -2774,7 +2781,12 @@ def fit_g2(results, curve, parameters, *, fit_window=None, use_rate=True, show=T
     fwhm = fwhm_factor * abs(fitted_parameters[definition["scale_parameter"]])
     fwhm_uncertainty = fwhm_factor * parameter_uncertainties[definition["scale_parameter"]]
 
-    x_fit = np.linspace(float(np.min(x_fit_data)), float(np.max(x_fit_data)), 1000)
+    # x_fit = np.linspace(float(np.min(x_fit_data)), float(np.max(x_fit_data)), 1000)
+    x_fit = np.arange(
+        float(np.min(x_fit_data)),
+        float(np.max(x_fit_data)),
+        0.01,
+    )
     y_fit = definition["function"](x_fit, *popt)
     fit_results = {
         "curve": curve_key,

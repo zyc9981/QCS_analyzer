@@ -86,7 +86,7 @@ def qcs_kernal(
 
     Ta_s_max=1,
     Ta_rt_s_max=10,
-    time_bin_ps_min=20,
+    time_bin_ps_min=10,
     fit_curve="g2calib_1",
     fit_parameters={
         "height": 40,
@@ -390,7 +390,7 @@ def qcs_kernal(
                 curve=fit_curve,
                 parameters=fit_parameters,
                 # fit_window=state["tau_span_ps"],
-                fit_window=np.rint(float(1e12)/Freq) * 1.6,
+                fit_window=np.rint(float(1e12)/Freq) * 1.5,
                 show=show_fit,
             )
 
@@ -505,7 +505,8 @@ def qcs_kernal(
                 
                 Ta_rt_s = np.round((fwhm_calib_ps / 10 / np.abs(udrift_rt) * 1e-12) / Ta_s_init) * Ta_s_init
                 Ta_rt_s = np.min([Ta_rt_s, Ta_rt_s_max])
-                state["Ta_rt_s"] = np.max([Ta_s_init, Ta_rt_s])
+                # state["Ta_rt_s"] = np.max([Ta_s_init, Ta_rt_s])
+                state["Ta_rt_s"] = Ta_rt_s
                 time_bin_rt_ps = round(time_bin_ps_init / state["Ta_rt_s"] * Ta_s_init / 10.0) * 10.0
                 state["time_bin_rt_ps"] = np.max([time_bin_rt_ps, time_bin_ps_min])
     
@@ -531,7 +532,8 @@ def qcs_kernal(
     # ------------------------------------------------------------
 
     # Step 1: remove the first six completed acquisitions from all records.
-    start_index = 6
+    # start_index = 6
+    start_index = 1
     record_slice = slice(min(start_index, acquisition_index), acquisition_index)
     point_records = point_records[record_slice]
     tau_ps_records = tau_ps_records[record_slice]
