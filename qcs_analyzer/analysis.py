@@ -9,11 +9,13 @@ from ._implementation import (
     fit_g2_gaussian,
     fit_g2_lorentzian,
     g2_process,
+    g2_process_sep,
     g2_process_time_dependent,
     g2_process_tstop_dependent,
     process_qcs_delay,
     timetag_channel_time_difference,
     timetag_correction,
+    timetag_correction_sep,
 )
 
 __all__ = [
@@ -25,9 +27,11 @@ __all__ = [
     "fit_g2_gaussian",
     "fit_g2_lorentzian",
     "g2_process",
+    "g2_process_sep",
     "g2_process_time_dependent",
     "g2_process_tstop_dependent",
     "process_qcs_delay",
     "timetag_channel_time_difference",
     "timetag_correction",
+    "timetag_correction_sep",
 ]

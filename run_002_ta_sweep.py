@@ -17,22 +17,14 @@ from qcs_analyzer.results import save_dict_npz
 
 INPUT = Path(
     r"C:\Yichi Zhang\QCS\20260924_Tx1_RB4_Characterization"
-    r"\011_50MHz_1200s_truncated_560s.h5"
+    r"\021_cw_1200s_1clock_truncated_570s.h5"
 )
 OUTPUT_DIR = INPUT.with_suffix("")
-# TA_LABELS = (
-#     "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.8", "1.0",
-#     "1.5", "2.0", "2.5", "3.0", "4.0", "5.0", "7.5",
-#     "10.0",
-# )
-# TA_LABELS = (
-#     "15.0", "20.0", "25.0", "30.0",
-# )
-# TA_LABELS = (
-#     "0.01", "0.02", "0.05",
-# )
 TA_LABELS = (
-    "1", "2", "5",
+    "0.1", "0.2", "0.3", "0.4", "0.5",
+    "0.6", "0.8", "1.0", "1.5", "2.0",
+    "2.5", "3.0", "4.0", "5.0", "7.5",
+    "10.0", "15.0", "20.0", "30.0", "45.0"
 )
 
 
@@ -78,9 +70,10 @@ def main():
             tau_ps_init=62200,
             tau_rt_ps_init=107400,
             fit_curve="g2calib_2",
-            time_bin_ps_init=100,
+            time_bin_ps_init=20,
             Ta_s_max=ta_s,
             Ta_ref_s=ta_s,
+            Ta_rt_s_max=ta_s,
             Freq=50e6,
         )
         plt.close("all")

@@ -30,7 +30,7 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 if __name__ == "__main__":
     # timetag_to_h5(sort_by_timestamp=False)
     # timetag_to_h5_TTXonly()
-    # trancate_timetag(60)
+    # trancate_timetag(570)
     # sys.exit()
 
     # results = load_g2_results()
@@ -70,11 +70,11 @@ if __name__ == "__main__":
     # tau_diff = qcs_results["tau_diff"]
     # tau_rt = qcs_results["tau_rt"]
     # t = qcs_results["center"]
-    # mask = (t < 480e12) & np.isfinite(tau_diff)
+    # # mask = (t < 480e12) & np.isfinite(tau_diff)
     # tau_diff = tau_diff - np.mean(tau_diff)
-    # tau_diff = tau_diff[mask]
+    # # tau_diff = tau_diff[mask]
     # tau_rt = tau_rt - np.mean(tau_rt)
-    # tau_rt = tau_rt[mask]
+    # # tau_rt = tau_rt[mask]
     # s1 = np.std(tau_diff, ddof=1)
     # s2 = np.std(tau_rt, ddof=1)
     # print("error_diff:", s1)
@@ -102,45 +102,52 @@ if __name__ == "__main__":
     # # save_dict_npz(adev_result)
     # sys.exit()
 
-    t_ps, ch, details = timetag_correction(
-        t_ps, ch,
-        ch_qutag=3,
-        # ch_hh=4,
-        ch_hh=7,
-        return_parameters=True,
-        # correction_mode="first",
-        # correction_mode="linear_fit",
-        correction_mode="global",
-        # correction_mode="per_trigger",
-    )
+    # t_ps, ch, details = timetag_correction(
+    #     t_ps, ch,
+    #     ch_qutag=3,
+    #     # ch_hh=4,
+    #     ch_hh=7,
+    #     return_parameters=True,
+    #     # correction_mode="first",
+    #     # correction_mode="linear_fit",
+    #     correction_mode="global",
+    #     # correction_mode="per_trigger",
+    # )
 
-    Ta_s = 30.0
-    qcs_result = qcs_kernal(
-        t_ps,
-        ch,
+    # # Check reference jitter
+    # ref0 = t_ps[ch==3]
+    # ref1 = t_ps[ch==7]
+    # ref_diff = ref0 - ref1
+    # ref_jitter = np.std(ref_diff, ddof=1)
+    # print(f"Reference jitter: {ref_jitter:.8g}")
+    # sys.exit()
 
-        Ta_s_init=Ta_s,
-        tau_ps_init=62200,
-        # tau_ps_init=112100,
-        tau_rt_ps_init=107400,
+    # Ta_s = 30.0
+    # qcs_result = qcs_kernal(
+    #     t_ps,
+    #     ch,
 
-        fit_curve="g2calib_2",
-        # time_bin_ps_init=100,
-        time_bin_ps_init=20,
-        # Ta_s_max=10,
-        Ta_s_max=Ta_s,
-        # tau_span_ps_init=120e3,
+    #     Ta_s_init=Ta_s,
+    #     tau_ps_init=62200,
+    #     tau_rt_ps_init=107400,
 
-        # Ta_ref_s=0.1,
-        Ta_ref_s=Ta_s,
-        # show_fit=True,
-        # second_order_fit=True,
+    #     fit_curve="g2calib_2",
+    #     # time_bin_ps_init=100,
+    #     time_bin_ps_init=20,
+    #     # Ta_s_max=10,
+    #     Ta_s_max=Ta_s,
+    #     # tau_span_ps_init=120e3,
 
-        Ta_rt_s_max=Ta_s,
+    #     # Ta_ref_s=0.1,
+    #     Ta_ref_s=Ta_s,
+    #     # show_fit=True,
+    #     # second_order_fit=True,
 
-        Freq = 50e6,
-    )
-    save_dict_npz(qcs_result)
+    #     Ta_rt_s_max=Ta_s,
+
+    #     Freq = 50e6,
+    # )
+    # save_dict_npz(qcs_result)
 
     # qcs_results = load_dict_npz()
     # fig1, axes = plt.subplots(3, 1, sharex=True, squeeze=False)
@@ -164,14 +171,14 @@ if __name__ == "__main__":
     # fig1.tight_layout()
     # plt.show()
 
-    sys.exit()
+    # sys.exit()
 
     results = g2_process(
         t_ps,
         ch,
-        t_center=107.4,
+        # t_center=107.4,
         # t_center=62.2,
-        # t_center=45.75,
+        t_center=45.75,
         # t_center=-0.025,
         # t_stop=600,
         t_span=10,

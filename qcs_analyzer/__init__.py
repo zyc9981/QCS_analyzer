@@ -20,6 +20,7 @@ from .analysis import (
     process_qcs_delay,
     timetag_channel_time_difference,
     timetag_correction,
+    timetag_correction_sep,
 )
 from .cli import main
 from .config import (
@@ -29,11 +30,12 @@ from .config import (
 )
 from .io import (
     load_timetag,
+    load_timetag_sep,
     timetag_to_h5,
+    timetag_to_h5_sep,
     timetag_to_h5_TTXonly,
     timetag_to_h5_qutagHH,
     timetag_to_h5_qutag,
-    timetag_to_h5_fast,
     trancate_timetag,
     truncate_timetag,
 )
@@ -61,6 +63,7 @@ __all__ = [
     "get_default_file_dialog_directory",
     "load_g2_results",
     "load_timetag",
+    "load_timetag_sep",
     "load_time_dependent_results",
     "main",
     "plot_photon_count",
@@ -71,11 +74,12 @@ __all__ = [
     "set_default_file_dialog_directory",
     "timetag_channel_time_difference",
     "timetag_correction",
+    "timetag_correction_sep",
     "timetag_to_h5",
+    "timetag_to_h5_sep",
     "timetag_to_h5_TTXonly",
     "timetag_to_h5_qutagHH",
     "timetag_to_h5_qutag",
-    "timetag_to_h5_fast",
     "trancate_timetag",
     "truncate_timetag",
 ]

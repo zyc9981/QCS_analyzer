@@ -2,22 +2,24 @@
 
 from ._implementation import (
     load_timetag,
+    load_timetag_sep,
     timetag_to_h5,
+    timetag_to_h5_sep,
     timetag_to_h5_TTXonly,
     timetag_to_h5_qutagHH,
     timetag_to_h5_qutag,
-    timetag_to_h5_fast,
     trancate_timetag,
     truncate_timetag,
 )
 
 __all__ = [
     "load_timetag",
+    "load_timetag_sep",
     "timetag_to_h5",
+    "timetag_to_h5_sep",
     "timetag_to_h5_TTXonly",
     "timetag_to_h5_qutagHH",
     "timetag_to_h5_qutag",
-    "timetag_to_h5_fast",
     "trancate_timetag",
     "truncate_timetag",
 ]

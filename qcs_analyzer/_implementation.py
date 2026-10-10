@@ -979,6 +979,188 @@ def timetag_to_h5(
     return output_filename
 
 
+def timetag_to_h5_sep(
+    filename=None,
+    output_filename=None,
+    chunk_size=1_000_000,
+    compression="gzip",
+    progress_every=1_000_000,
+    hydraharp_filename=None,
+    hydraharp_channel_offset=5,
+    ch_trig_time_tagger=3,
+    ch_trig_hh=7,
+):
+    """Save Time Tagger X and HydraHarp events as separate HDF5 streams.
+
+    ``t1_ps``/``ch1`` contain Time Tagger X events and ``t2_ps``/``ch2``
+    contain HydraHarp events. Channels are normalized/offset exactly as in
+    :func:`timetag_to_h5`, and each source's first trigger is rebased to zero.
+    Events remain in their source order; the two streams are never merged.
+    The separate layout is not accepted by the existing ``load_timetag`` or
+    ``truncate_timetag`` functions, which expect ``t_ps``/``ch`` datasets.
+    """
+    if not isinstance(chunk_size, (int, np.integer)) or chunk_size <= 0:
+        raise ValueError("chunk_size must be a positive integer.")
+
+    if filename is None:
+        filename = _open_file_dialog(
+            "Select Time Tagger X .ttbin file", TIMETAGGER_TTBIN_FILETYPES
+        )
+    filename = _require_selected_filename(filename, "Time Tagger X .ttbin file")
+
+    selected_time_tagger_path = Path(filename)
+    if selected_time_tagger_path.suffix.lower() != ".ttbin":
+        raise ValueError("Time Tagger X input must be a FileWriter .ttbin file.")
+    time_tagger_path = _timetagger_sequence_header_filename(selected_time_tagger_path)
+    if not time_tagger_path.is_file():
+        raise FileNotFoundError(f"Time Tagger X .ttbin file was not found: {time_tagger_path}")
+    if time_tagger_path != selected_time_tagger_path:
+        print(f"Using FileWriter sequence header: {time_tagger_path}")
+
+    if hydraharp_filename is None:
+        hydraharp_filename = _matching_hydraharp_h5_filename(time_tagger_path)
+    hydraharp_path = Path(hydraharp_filename)
+    if not hydraharp_path.is_file():
+        raise FileNotFoundError(
+            f"Matching HydraHarp H5 file was not found: {hydraharp_path}"
+        )
+    with h5py.File(hydraharp_path, "r") as hh_h5:
+        if "t_ps" not in hh_h5 or "ch" not in hh_h5:
+            raise ValueError(f"HydraHarp H5 is missing t_ps and/or ch: {hydraharp_path}")
+        if len(hh_h5["t_ps"]) != len(hh_h5["ch"]):
+            raise ValueError(f"HydraHarp H5 t_ps/ch lengths differ: {hydraharp_path}")
+        if len(hh_h5["t_ps"]) == 0:
+            raise ValueError(f"HydraHarp H5 contains no timetag records: {hydraharp_path}")
+
+    if output_filename is None:
+        output_filename = time_tagger_path.with_name(f"{time_tagger_path.stem}_sep.h5")
+    output_path = Path(output_filename)
+    if output_path.resolve() == hydraharp_path.resolve():
+        raise ValueError("Output filename must differ from the HydraHarp input file.")
+    if output_path.exists():
+        raise FileExistsError(f"Refusing to overwrite existing file: {output_path}")
+
+    # Find each first trigger without retaining every trigger timestamp.
+    time_tagger_initial_trigger_t_ps = _initial_t_ps_for_channel(
+        _iter_timetagger_ttbin_chunks(time_tagger_path, chunk_size=chunk_size),
+        ch_trig_time_tagger,
+        "Time Tagger X",
+    )
+    hydraharp_initial_trigger_t_ps = _initial_t_ps_for_channel(
+        _iter_h5_timetag_chunks(
+            hydraharp_path,
+            chunk_size=chunk_size,
+            channel_offset=hydraharp_channel_offset,
+        ),
+        ch_trig_hh,
+        "HydraHarp",
+    )
+    time_tagger_time_offset_ps = -time_tagger_initial_trigger_t_ps
+    hydraharp_time_offset_ps = -hydraharp_initial_trigger_t_ps
+
+    print(
+        "Trigger alignment (first triggers rebased to zero): "
+        f"Time Tagger X ch {ch_trig_time_tagger} at {time_tagger_initial_trigger_t_ps} ps; "
+        f"HydraHarp ch {ch_trig_hh} at {hydraharp_initial_trigger_t_ps} ps"
+    )
+
+    def write_stream(h5, time_name, channel_name, chunks):
+        dataset_chunk_size = min(int(chunk_size), 1_000_000)
+        time_dataset = h5.create_dataset(
+            time_name,
+            shape=(0,),
+            maxshape=(None,),
+            dtype=np.int64,
+            chunks=(dataset_chunk_size,),
+            compression=compression,
+        )
+        channel_dataset = h5.create_dataset(
+            channel_name,
+            shape=(0,),
+            maxshape=(None,),
+            dtype=np.uint8,
+            chunks=(dataset_chunk_size,),
+            compression=compression,
+        )
+        channel_limits = np.iinfo(np.uint8)
+        count = 0
+        removed = 0
+        next_progress = progress_every
+        for times, channels in chunks:
+            nonnegative = times >= 0
+            if not np.all(nonnegative):
+                removed += len(times) - int(np.count_nonzero(nonnegative))
+                times = times[nonnegative]
+                channels = channels[nonnegative]
+            if not len(times):
+                continue
+            if channels.min() < channel_limits.min or channels.max() > channel_limits.max:
+                raise ValueError(
+                    f"Channel values {channels.min()}..{channels.max()} do not fit in uint8."
+                )
+            new_count = count + len(times)
+            time_dataset.resize(new_count, axis=0)
+            channel_dataset.resize(new_count, axis=0)
+            time_dataset[count:new_count] = times
+            channel_dataset[count:new_count] = channels.astype(np.uint8, copy=False)
+            count = new_count
+            while progress_every and count >= next_progress:
+                print(f"{time_name} records: {next_progress:,}")
+                next_progress += progress_every
+        return count, removed
+
+    with h5py.File(output_path, "x") as h5:
+        h5.attrs["source_format"] = "timetagger_x_ttbin_plus_hydraharp_h5_separate"
+        h5.attrs["timestamp_unit"] = "ps"
+        h5.attrs["channel_dtype"] = "uint8"
+        h5.attrs["time_tagger_x_source_filename"] = str(time_tagger_path)
+        h5.attrs["time_tagger_x_edge_channels_normalized"] = "abs(channel) for inputs 1 through 4"
+        h5.attrs["hydraharp_source_filename"] = str(hydraharp_path)
+        h5.attrs["hydraharp_channel_offset"] = int(hydraharp_channel_offset)
+        h5.attrs["time_tagger_x_trigger_channel"] = int(ch_trig_time_tagger)
+        h5.attrs["hydraharp_trigger_channel"] = int(ch_trig_hh)
+        h5.attrs["time_tagger_x_initial_trigger_t_ps"] = time_tagger_initial_trigger_t_ps
+        h5.attrs["hydraharp_initial_trigger_t_ps"] = hydraharp_initial_trigger_t_ps
+        h5.attrs["alignment_reference"] = "each_tagger_first_trigger_at_zero"
+        h5.attrs["time_tagger_x_time_offset_ps"] = time_tagger_time_offset_ps
+        h5.attrs["hydraharp_time_offset_ps"] = hydraharp_time_offset_ps
+
+        count1, removed1 = write_stream(
+            h5,
+            "t1_ps",
+            "ch1",
+            _offset_timetag_chunks(
+                _iter_timetagger_ttbin_chunks(time_tagger_path, chunk_size=chunk_size),
+                time_offset_ps=time_tagger_time_offset_ps,
+            ),
+        )
+        count2, removed2 = write_stream(
+            h5,
+            "t2_ps",
+            "ch2",
+            _offset_timetag_chunks(
+                _iter_h5_timetag_chunks(
+                    hydraharp_path,
+                    chunk_size=chunk_size,
+                    channel_offset=hydraharp_channel_offset,
+                ),
+                time_offset_ps=hydraharp_time_offset_ps,
+            ),
+        )
+        h5.attrs["time_tagger_x_negative_timestamp_events_removed"] = removed1
+        h5.attrs["hydraharp_negative_timestamp_events_removed"] = removed2
+        h5.attrs["time_tagger_x_record_count"] = count1
+        h5.attrs["hydraharp_record_count"] = count2
+
+    if count1 == 0 or count2 == 0:
+        raise ValueError("At least one tagger stream has no nonnegative timetag records.")
+    print(f"Saved separate-stream H5 file: {output_path}")
+    print(f"Time Tagger X records: {count1:,}; HydraHarp records: {count2:,}")
+    if removed1 or removed2:
+        print(f"Removed negative timestamps: Time Tagger X {removed1:,}; HydraHarp {removed2:,}.")
+    return str(output_path)
+
+
 def timetag_to_h5_TTXonly(
     filename=None,
     output_filename=None,
@@ -1228,201 +1410,6 @@ def timetag_to_h5_qutag(
     print(f"Processed input records: {n_input:,}/{total_items:,}")
     print(f"Saved H5 file: {output_filename}")
     print(f"Rows saved: {n_total}")
-    return output_filename
-
-
-def timetag_to_h5_fast(
-    filename=None,
-    header_lines=1,
-    delimiter=",",
-    output_filename=None,
-    chunk_size=1_000_000,
-    compression="gzip",
-    progress_every=1_000_000,
-    source_format="auto",
-    binary_header_bytes=QUTAG_BINARY_HEADER_BYTES,
-    allow_trailing_partial_binary_record=True,
-    hydraharp_filename=None,
-    hydraharp_channel_offset=5,
-    ch_trig_qutag=2,
-    ch_trig_hh=7,
-    sort_by_timestamp=True,
-):
-    """Create the v3 combined H5 result using full in-memory arrays.
-
-    This has the same first-trigger alignment, negative timestamp removal,
-    channel offset, and stable timestamp sort as
-    :func:`timetag_to_h5_qutagHH`. It is faster for recordings that fit comfortably
-    in RAM, but intentionally uses substantially more memory.
-    """
-    if filename is None:
-        filename = _open_file_dialog("Select timetag file", TIMETAG_SOURCE_FILETYPES)
-    filename = _require_selected_filename(filename, "timetag file")
-
-    source_path = Path(filename)
-    if output_filename is None:
-        output_filename = str(source_path.with_name(f"{source_path.stem}_fast.h5"))
-
-    if hydraharp_filename is None:
-        hydraharp_filename = _matching_hydraharp_h5_filename(filename)
-    hydraharp_path = Path(hydraharp_filename)
-    if not hydraharp_path.is_file():
-        raise FileNotFoundError(f"Matching HydraHarp H5 file was not found: {hydraharp_path}")
-
-    source_format = _normalize_timetag_source_format(filename, source_format)
-    if source_format == "binary":
-        total_items = _estimate_qutag_binary_record_count(
-            filename,
-            header_bytes=binary_header_bytes,
-            allow_trailing_partial_record=allow_trailing_partial_binary_record,
-        )
-        total_label = "records"
-        t_dtype = np.int64
-        with open(filename, "rb") as qutag_file:
-            qutag_file.seek(int(binary_header_bytes))
-            records = np.fromfile(
-                qutag_file,
-                dtype=QUTAG_BINARY_RECORD_DTYPE,
-                count=total_items,
-            )
-        qutag_t_ps = records["t_ps"].astype(np.int64, copy=False)
-        qutag_ch = records["ch"].astype(np.int64, copy=False)
-    else:
-        total_items = _estimate_fixed_width_line_count(filename)
-        total_label = "lines"
-        t_dtype = np.float64
-        qutag_t_chunks = []
-        qutag_ch_chunks = []
-        for t_chunk, ch_chunk in _iter_timetag_chunks(
-            filename,
-            header_lines=header_lines,
-            delimiter=delimiter,
-            chunk_size=chunk_size,
-        ):
-            qutag_t_chunks.append(t_chunk)
-            qutag_ch_chunks.append(ch_chunk)
-        if qutag_t_chunks:
-            qutag_t_ps = np.concatenate(qutag_t_chunks)
-            qutag_ch = np.concatenate(qutag_ch_chunks)
-        else:
-            qutag_t_ps = np.empty(0, dtype=t_dtype)
-            qutag_ch = np.empty(0, dtype=np.int64)
-
-    with h5py.File(hydraharp_path, "r") as hh_h5:
-        if "t_ps" not in hh_h5 or "ch" not in hh_h5:
-            raise ValueError(f"HydraHarp H5 is missing t_ps and/or ch: {hydraharp_path}")
-        if len(hh_h5["t_ps"]) != len(hh_h5["ch"]):
-            raise ValueError(f"HydraHarp H5 t_ps/ch lengths differ: {hydraharp_path}")
-        hydraharp_t_ps = np.asarray(hh_h5["t_ps"])
-        hydraharp_ch = np.asarray(hh_h5["ch"], dtype=np.int64)
-    hydraharp_items = len(hydraharp_t_ps)
-    if hydraharp_items == 0:
-        raise ValueError(f"HydraHarp H5 contains no timetag records: {hydraharp_path}")
-    if hydraharp_channel_offset:
-        hydraharp_ch += int(hydraharp_channel_offset)
-
-    print(f"Input format: {source_format}")
-    print(f"Loaded QuTAG {total_label}: {len(qutag_t_ps):,}")
-    print(f"Loaded HydraHarp records: {hydraharp_items:,} (channel offset +{hydraharp_channel_offset})")
-
-    qutag_trigger_timestamps = _channel_timestamps(
-        ((qutag_t_ps, qutag_ch),), ch_trig_qutag, "QuTAG"
-    )
-    hydraharp_trigger_timestamps = _channel_timestamps(
-        ((hydraharp_t_ps, hydraharp_ch),), ch_trig_hh, "HydraHarp"
-    )
-
-    # Rebase each tagger to its own first trigger, making both triggers 0 ps.
-    qutag_initial_trigger_t_ps = qutag_trigger_timestamps[0]
-    hydraharp_initial_trigger_t_ps = hydraharp_trigger_timestamps[0]
-    qutag_time_offset_ps = -qutag_initial_trigger_t_ps
-    hydraharp_time_offset_ps = -hydraharp_initial_trigger_t_ps
-    print(
-        "Trigger alignment (first triggers rebased to zero): "
-        f"QuTAG ch {ch_trig_qutag} at {qutag_initial_trigger_t_ps} ps; "
-        f"HydraHarp ch {ch_trig_hh} at {hydraharp_initial_trigger_t_ps} ps; "
-        f"QuTAG offset {qutag_time_offset_ps} ps; "
-        f"HydraHarp offset {hydraharp_time_offset_ps} ps"
-    )
-    qutag_t_ps = qutag_t_ps + qutag_time_offset_ps
-    hydraharp_t_ps = hydraharp_t_ps + hydraharp_time_offset_ps
-
-    combined_t_ps = np.concatenate((qutag_t_ps, hydraharp_t_ps))
-    combined_ch = np.concatenate((qutag_ch, hydraharp_ch))
-    nonnegative_mask = combined_t_ps >= 0
-    negative_timestamp_events_removed = int(
-        len(combined_t_ps) - np.count_nonzero(nonnegative_mask)
-    )
-    combined_t_ps = combined_t_ps[nonnegative_mask]
-    combined_ch = combined_ch[nonnegative_mask]
-    if len(combined_t_ps) == 0:
-        raise ValueError("All combined timetag events have t_ps < 0.")
-
-    ch_info = np.iinfo(np.uint8)
-    if combined_ch.min() < ch_info.min or combined_ch.max() > ch_info.max:
-        raise ValueError(
-            f"Channel values {combined_ch.min()}..{combined_ch.max()} do not fit in uint8."
-        )
-
-    if sort_by_timestamp:
-        order = np.argsort(combined_t_ps, kind="stable")
-        combined_t_ps = combined_t_ps[order]
-        combined_ch = combined_ch[order]
-        timestamps_sorted = True
-    else:
-        timestamps_sorted = False
-
-    n_total = len(combined_t_ps)
-    with h5py.File(output_filename, "w") as h5:
-        h5.attrs["source_format"] = f"{source_format}_plus_hydraharp_h5"
-        h5.attrs["timestamp_unit"] = "ps"
-        h5.attrs["channel_dtype"] = "uint8"
-        h5.attrs["qutag_source_filename"] = str(source_path)
-        h5.attrs["hydraharp_source_filename"] = str(hydraharp_path)
-        h5.attrs["hydraharp_channel_offset"] = int(hydraharp_channel_offset)
-        h5.attrs["qutag_trigger_channel"] = int(ch_trig_qutag)
-        h5.attrs["hydraharp_trigger_channel"] = int(ch_trig_hh)
-        h5.attrs["qutag_trigger_event_count"] = len(qutag_trigger_timestamps)
-        h5.attrs["hydraharp_trigger_event_count"] = len(hydraharp_trigger_timestamps)
-        h5.attrs["qutag_first_observed_trigger_t_ps"] = qutag_trigger_timestamps[0]
-        h5.attrs["hydraharp_first_observed_trigger_t_ps"] = hydraharp_trigger_timestamps[0]
-        h5.attrs["qutag_initial_trigger_t_ps"] = qutag_initial_trigger_t_ps
-        h5.attrs["hydraharp_initial_trigger_t_ps"] = hydraharp_initial_trigger_t_ps
-        h5.attrs["alignment_reference"] = "each_tagger_first_trigger_at_zero"
-        h5.attrs["qutag_time_offset_ps"] = qutag_time_offset_ps
-        h5.attrs["hydraharp_time_offset_ps"] = hydraharp_time_offset_ps
-        h5.attrs["negative_timestamp_events_removed"] = negative_timestamp_events_removed
-        h5.attrs["timestamps_sorted"] = timestamps_sorted
-        if timestamps_sorted:
-            h5.attrs["timestamp_sort_order"] = "stable ascending t_ps"
-        if source_format == "binary":
-            h5.attrs["qutag_binary_header_bytes"] = int(binary_header_bytes)
-
-        t_ds = h5.create_dataset(
-            "t_ps",
-            shape=(0,),
-            maxshape=(None,),
-            dtype=t_dtype,
-            chunks=(min(chunk_size, 1_000_000),),
-            compression=compression,
-        )
-        ch_ds = h5.create_dataset(
-            "ch",
-            shape=(0,),
-            maxshape=(None,),
-            dtype=np.uint8,
-            chunks=(min(chunk_size, 1_000_000),),
-            compression=compression,
-        )
-        t_ds.resize(n_total, axis=0)
-        ch_ds.resize(n_total, axis=0)
-        t_ds[:] = combined_t_ps
-        ch_ds[:] = combined_ch.astype(np.uint8, copy=False)
-
-    if negative_timestamp_events_removed:
-        print(f"Removed {negative_timestamp_events_removed:,} event(s) with t_ps < 0.")
-    print(f"Saved fast H5 file: {output_filename}")
-    print(f"Rows saved: {n_total:,}")
     return output_filename
 
 
@@ -1846,6 +1833,174 @@ def timetag_correction(
     return corrected_t_ps, corrected_ch
 
 
+def timetag_correction_sep(
+    t1_ps,
+    ch1,
+    t2_ps,
+    ch2,
+    ch_qutag=3,
+    ch_hh=7,
+    qutag_channel_max=4,
+    correction_mode="per_trigger",
+    return_parameters=False,
+):
+    """Correct two separate tagger streams without merging their events.
+
+    The mapping is determined from trigger channels in both streams. It is
+    applied to Time Tagger X events in ``t1_ps`` with channel IDs from 0
+    through ``qutag_channel_max``; HydraHarp timestamps in ``t2_ps`` retain
+    their scale. Both streams are referred to the first paired trigger.
+    ``global`` mode removes events outside their shared corrected interval.
+
+    Return ``(corrected_t1_ps, ch1, corrected_t2_ps, ch2)`` and, when
+    ``return_parameters`` is true, append the correction dictionary.
+    """
+    t1_ps = np.asarray(t1_ps).ravel()
+    ch1 = np.asarray(ch1).ravel()
+    t2_ps = np.asarray(t2_ps).ravel()
+    ch2 = np.asarray(ch2).ravel()
+    if len(t1_ps) != len(ch1) or len(t2_ps) != len(ch2):
+        raise ValueError("Each timestamp array must match its channel array in length.")
+
+    ch_qutag = int(ch_qutag)
+    ch_hh = int(ch_hh)
+    qutag_channel_max = int(qutag_channel_max)
+    correction_mode = str(correction_mode).lower()
+    if correction_mode not in ("per_trigger", "linear_fit", "global", "first"):
+        raise ValueError(
+            "correction_mode must be 'per_trigger', 'linear_fit', 'global', or 'first'."
+        )
+
+    if correction_mode == "first":
+        qutag_triggers = t1_ps[ch1 == ch_qutag]
+        hydraharp_triggers = t2_ps[ch2 == ch_hh]
+        if len(qutag_triggers):
+            qutag_triggers = np.array([np.min(qutag_triggers)], dtype=np.float64)
+        if len(hydraharp_triggers):
+            hydraharp_triggers = np.array([np.min(hydraharp_triggers)], dtype=np.float64)
+    else:
+        qutag_triggers = np.sort(t1_ps[ch1 == ch_qutag].astype(np.float64))
+        hydraharp_triggers = np.sort(t2_ps[ch2 == ch_hh].astype(np.float64))
+    if len(qutag_triggers) == 0 or len(hydraharp_triggers) == 0:
+        raise ValueError(
+            f"Both trigger channels must contain events; Time Tagger X ch {ch_qutag}: "
+            f"{len(qutag_triggers)}, HydraHarp ch {ch_hh}: {len(hydraharp_triggers)}."
+        )
+
+    pair_count = min(len(qutag_triggers), len(hydraharp_triggers))
+    if correction_mode != "first" and pair_count < 2:
+        raise ValueError(
+            "At least two paired trigger events are required for per_trigger, "
+            "linear_fit, or global correction."
+        )
+    qutag_trigger_pairs = qutag_triggers[:pair_count]
+    hydraharp_trigger_pairs = hydraharp_triggers[:pair_count]
+    qutag_reference_t_ps = qutag_trigger_pairs[0]
+    hydraharp_reference_t_ps = hydraharp_trigger_pairs[0]
+
+    if correction_mode == "first":
+        local_time_scales = np.array([], dtype=float)
+        overall_time_scale = 1.0
+    else:
+        qutag_elapsed_ps = qutag_trigger_pairs - qutag_reference_t_ps
+        hydraharp_elapsed_ps = hydraharp_trigger_pairs - hydraharp_reference_t_ps
+        qutag_interval_ps = np.diff(qutag_trigger_pairs)
+        hydraharp_interval_ps = np.diff(hydraharp_trigger_pairs)
+        if np.any(qutag_interval_ps <= 0):
+            raise ValueError("Time Tagger X trigger timestamps do not span elapsed time.")
+        local_time_scales = hydraharp_interval_ps / qutag_interval_ps
+        overall_time_scale = float(hydraharp_elapsed_ps[-1] / qutag_elapsed_ps[-1])
+
+    corrected_t1_ps = t1_ps.astype(np.float64, copy=True)
+    corrected_t2_ps = t2_ps.astype(np.float64, copy=True)
+    qutag_event_mask = (ch1 >= 0) & (ch1 <= qutag_channel_max)
+    if not np.any(qutag_event_mask):
+        raise ValueError("No Time Tagger X events match qutag_channel_max.")
+    qutag_event_timestamps = corrected_t1_ps[qutag_event_mask]
+    applied_time_scale = overall_time_scale
+
+    if correction_mode == "first":
+        corrected_t1_ps[qutag_event_mask] = (
+            qutag_event_timestamps - qutag_reference_t_ps + hydraharp_reference_t_ps
+        )
+    elif correction_mode == "per_trigger":
+        interval_indices = np.searchsorted(
+            qutag_trigger_pairs, qutag_event_timestamps, side="right"
+        ) - 1
+        interval_indices = np.clip(interval_indices, 0, pair_count - 2)
+        corrected_t1_ps[qutag_event_mask] = (
+            hydraharp_trigger_pairs[interval_indices]
+            + (qutag_event_timestamps - qutag_trigger_pairs[interval_indices])
+            * local_time_scales[interval_indices]
+        )
+    elif correction_mode == "linear_fit":
+        elapsed_norm = np.dot(qutag_elapsed_ps, qutag_elapsed_ps)
+        if elapsed_norm == 0:
+            raise ValueError("Time Tagger X trigger timestamps do not span elapsed time.")
+        time_scale = float(np.dot(qutag_elapsed_ps, hydraharp_elapsed_ps) / elapsed_norm)
+        applied_time_scale = time_scale
+        corrected_t1_ps[qutag_event_mask] = (
+            (qutag_event_timestamps - qutag_reference_t_ps) * time_scale
+            + hydraharp_reference_t_ps
+        )
+    else:  # global
+        corrected_t1_ps[qutag_event_mask] = (
+            (qutag_event_timestamps - qutag_reference_t_ps) * overall_time_scale
+            + hydraharp_reference_t_ps
+        )
+
+    corrected_t1_ps -= hydraharp_reference_t_ps
+    corrected_t2_ps -= hydraharp_reference_t_ps
+    shared_duration_ps = min(
+        float(np.max(corrected_t1_ps[qutag_event_mask])),
+        float(np.max(corrected_t2_ps)),
+    )
+    if correction_mode == "global":
+        keep1 = (corrected_t1_ps >= 0.0) & (corrected_t1_ps <= shared_duration_ps)
+        keep2 = (corrected_t2_ps >= 0.0) & (corrected_t2_ps <= shared_duration_ps)
+        removed_outside_shared_interval = (
+            len(corrected_t1_ps) - int(np.count_nonzero(keep1))
+            + len(corrected_t2_ps) - int(np.count_nonzero(keep2))
+        )
+        corrected_t1_ps = corrected_t1_ps[keep1]
+        corrected_ch1 = ch1[keep1].copy()
+        corrected_t2_ps = corrected_t2_ps[keep2]
+        corrected_ch2 = ch2[keep2].copy()
+    else:
+        removed_outside_shared_interval = 0
+        corrected_ch1 = ch1.copy()
+        corrected_ch2 = ch2.copy()
+
+    correction = {
+        "correction_mode": correction_mode,
+        "time_scale": applied_time_scale,
+        "local_time_scales": local_time_scales,
+        "qutag_reference_t_ps": qutag_reference_t_ps,
+        "hydraharp_reference_t_ps": hydraharp_reference_t_ps,
+        "paired_trigger_count": pair_count,
+        "qutag_trigger_skip_count": 0,
+        "hydraharp_trigger_skip_count": 0,
+        "corrected_qutag_channel_max": qutag_channel_max,
+        "shared_duration_ps": shared_duration_ps,
+        "events_removed_outside_shared_interval": removed_outside_shared_interval,
+        "timestamps_clipped_to_shared_interval": False,
+    }
+    print(
+        "Timebase correction: "
+        f"{pair_count:,} trigger pairs used, mode={correction_mode}, "
+        f"applied Time Tagger X scale={applied_time_scale:.12g}, "
+        f"reference {qutag_reference_t_ps:g} ps -> {hydraharp_reference_t_ps:g} ps; "
+        + (
+            f"removed {removed_outside_shared_interval:,} events outside the shared interval."
+            if correction_mode == "global"
+            else "kept all input events."
+        )
+    )
+    if return_parameters:
+        return corrected_t1_ps, corrected_ch1, corrected_t2_ps, corrected_ch2, correction
+    return corrected_t1_ps, corrected_ch1, corrected_t2_ps, corrected_ch2
+
+
 def load_timetag(filename=None, return_filename=False):
     """Load t_ps and ch arrays from a timetag .npz, .h5/.hdf5, or .mat file.
 
@@ -1862,6 +2017,42 @@ def load_timetag(filename=None, return_filename=False):
         return t_ps, ch, filename
 
     return t_ps, ch
+
+
+def load_timetag_sep(filename=None):
+    """Load separate Time Tagger X and HydraHarp streams from an HDF5 file.
+
+    Return ``(t1_ps, ch1, t2_ps, ch2, filename)``. The arrays are loaded in
+    full; ``t1_ps``/``ch1`` are the first tagger and ``t2_ps``/``ch2`` the
+    second tagger, as written by :func:`timetag_to_h5_sep`.
+    """
+    if filename is None:
+        filename = _open_file_dialog(
+            "Select separate-stream timetag H5 file",
+            [("HDF5 files", "*.h5 *.hdf5"), ("All files", "*.*")],
+        )
+    filename = _require_selected_filename(filename, "separate-stream timetag H5 file")
+
+    with h5py.File(filename, "r") as h5:
+        required = ("t1_ps", "ch1", "t2_ps", "ch2")
+        missing = [name for name in required if name not in h5]
+        if missing:
+            raise ValueError(
+                "Separate-stream H5 file is missing dataset(s): " + ", ".join(missing)
+            )
+        if any(h5[name].ndim != 1 for name in required):
+            raise ValueError("Separate-stream timetag datasets must be one-dimensional.")
+        if len(h5["t1_ps"]) != len(h5["ch1"]):
+            raise ValueError("t1_ps and ch1 must contain the same number of records.")
+        if len(h5["t2_ps"]) != len(h5["ch2"]):
+            raise ValueError("t2_ps and ch2 must contain the same number of records.")
+
+        t1_ps = np.array(h5["t1_ps"])
+        ch1 = np.array(h5["ch1"])
+        t2_ps = np.array(h5["t2_ps"])
+        ch2 = np.array(h5["ch2"])
+
+    return t1_ps, ch1, t2_ps, ch2, filename
 
 
 # =============================================================================
@@ -2276,6 +2467,172 @@ def g2_process(
     }
 
 
+def g2_process_sep(
+    t1_ps,
+    t2_ps,
+    t_center=6.25,
+    t_span=40,
+    t_stop=None,
+    bg_A=500,
+    bg_B=740,
+    freq=50e6,
+    time_bin=1.0,
+    sig_half=5,
+    filename=None,
+):
+    """Count coincidences between two channel-specific timestamp arrays.
+
+    Inputs are picoseconds; histogram settings are nanoseconds. ``t_stop`` is
+    measured in seconds from the earliest timestamp in either array.
+    """
+    # Import here because qcs_kernal imports this module. This reuses its
+    # compiled pair counter without introducing a module-level import cycle.
+    from .qcs_kernal import g2_histogram_numba
+
+    t1_ps = np.asarray(t1_ps).ravel()
+    t2_ps = np.asarray(t2_ps).ravel()
+    if len(t1_ps) == 0 or len(t2_ps) == 0:
+        raise ValueError("t1_ps and t2_ps must not be empty.")
+    if not np.all(np.isfinite(t1_ps)) or not np.all(np.isfinite(t2_ps)):
+        raise ValueError("t1_ps and t2_ps must contain only finite timestamps.")
+
+    # The Numba two-pointer counter requires each channel to be chronological.
+    if np.any(t1_ps[1:] < t1_ps[:-1]):
+        t1_ps = np.sort(t1_ps)
+    if np.any(t2_ps[1:] < t2_ps[:-1]):
+        t2_ps = np.sort(t2_ps)
+
+    time_origin_ps = min(t1_ps[0], t2_ps[0])
+    T_file_s = (max(t1_ps[-1], t2_ps[-1]) - time_origin_ps) * 1e-12
+    if not np.isfinite(T_file_s) or T_file_s <= 0:
+        raise ValueError("The two timestamp arrays must span a positive duration.")
+
+    t_stop_requested_s = None
+    if t_stop is None:
+        T_acq_s = T_file_s
+    else:
+        t_stop = float(t_stop)
+        if not np.isfinite(t_stop) or t_stop <= 0:
+            raise ValueError("t_stop must be a positive number of seconds.")
+        t_stop_requested_s = t_stop
+        T_acq_s = min(T_file_s, t_stop)
+
+    # Use the same time origin for both channels so their delays are retained.
+    T_acq_ps = T_acq_s * 1e12
+    tA = np.asarray(t1_ps - time_origin_ps, dtype=np.float64)
+    tB = np.asarray(t2_ps - time_origin_ps, dtype=np.float64)
+    if t_stop_requested_s is not None:
+        tA = tA[tA <= T_acq_ps]
+        tB = tB[tB <= T_acq_ps]
+    if len(tA) == 0 or len(tB) == 0:
+        raise ValueError("Both channels need timetags inside the processed window.")
+
+    cntA_total = len(tA)
+    cntB_total = len(tB)
+
+    print("--- File Summary ---")
+    if filename is not None:
+        print(f"File: {filename}")
+    else:
+        print("File: loaded timetag arrays")
+    print(f"File acquisition time: {T_file_s:.6f} s")
+    if t_stop_requested_s is not None:
+        print(f"Processed time window: 0.000000 s to {T_acq_s:.6f} s")
+    else:
+        print(f"Processed time window: full file ({T_acq_s:.6f} s)")
+    print(
+        f"Total counts on channel A: {cntA_total} "
+        f"-> {cntA_total / T_acq_s:.3f} cps"
+    )
+    print(
+        f"Total counts on channel B: {cntB_total} "
+        f"-> {cntB_total / T_acq_s:.3f} cps"
+    )
+
+    # ---------------- Build histogram bins ----------------
+    t_lo = t_center - t_span
+    t_hi = t_center + t_span
+
+    edges = np.arange(t_lo, t_hi + time_bin, time_bin)
+
+    if len(edges) < 2:
+        raise ValueError("Window too small for given bin width. Increase span or decrease bin.")
+
+    centers = edges[:-1] + time_bin / 2
+
+    # Reuse the exact compiled pair-counting method used by qcs_kernal.
+    # g2_histogram_numba expects timestamps and edges in picoseconds.
+    histogram_result = g2_histogram_numba(
+        tA,
+        tB,
+        edges * 1e3,
+        Ta_s=T_acq_s,
+        chA=None,
+        chB=None,
+        time_bin_ps_init=time_bin * 1e3,
+    )
+    H = histogram_result["histogram_raw"]
+    numA_used = len(tA)
+    numPairs = int(np.sum(H))
+
+    # Channel-A counts in each complete one-second interval.
+    full_seconds = int(np.floor(T_acq_s))
+    second_edges_ps = np.arange(full_seconds + 1, dtype=np.float64) * 1e12
+    SPA = np.diff(np.searchsorted(tA, second_edges_ps, side="left")).tolist()
+
+    # ---------------- Optional: background / CAR style metrics ----------------
+    sig_mask = (centers >= (t_center - sig_half)) & (centers <= (t_center + sig_half))
+    bg_mask = ~sig_mask
+
+    bg = np.mean(H[bg_mask])
+    bg = 0.0
+    cmax = np.max(H)
+
+    CC = np.sum(H[sig_mask]) - bg * np.sum(sig_mask)   # background-subtracted coincidences
+    # CC = np.sum(H[sig_mask])   # background-subtracted coincidences
+    CAR = (cmax - bg) / max(bg, np.finfo(float).eps)
+
+    CCps = CC / T_acq_s
+    CCppulse = CCps / freq
+
+    cntAps = cntA_total / T_acq_s - bg_A
+    cntBps = cntB_total / T_acq_s - bg_B
+
+    CC_raw = cntAps * cntBps / CCps
+    etaA = cntAps / CC_raw
+    etaB = cntBps / CC_raw
+
+    print("--- Counting Summary ---")
+    print(f"Detected CC (per second): {CCps:.6f}")
+    print(f"Detected CC (per pulse): {CCppulse:.8f}")
+    print(f"Raw CC (per second): {CC_raw:.6f}")
+    print(f"Ch A efficiency: {etaA:.6f}")
+    print(f"Ch B efficiency: {etaB:.6f}")
+    # print(f"CAR: {CAR:.6f}")
+
+    return {
+        "filename": filename,
+        "centers": centers,
+        "histogram": H,
+        "single_photon_counts": SPA,
+        "T_acq_s": T_acq_s,
+        "T_file_s": T_file_s,
+        "t_stop": t_stop_requested_s,
+        "time_bin": time_bin,
+        "cntA_total": cntA_total,
+        "cntB_total": cntB_total,
+        "CC": CC,
+        "CCps": CCps,
+        "CCppulse": CCppulse,
+        "CC_raw": CC_raw,
+        "etaA": etaA,
+        "etaB": etaB,
+        "CAR": CAR,
+        "numA_used": numA_used,
+        "numPairs": numPairs,
+    }
+
+
 # =============================================================================
 # RESULT FILES (.NPZ)
 # =============================================================================
@@ -2577,10 +2934,10 @@ def _g2calib_2_Hfunc(d):
 
 def _g2calib_2(x, height, center, sigma, offset):
     d = x - center
-    if sigma > 0.01:
+    if sigma > 0.001:
         term = (_g2calib_2_Hfunc(d + sigma / 2) - _g2calib_2_Hfunc(d - sigma / 2)) / sigma
     else:
-        term = (_g2calib_2_Hfunc(d + 0.01 / 2) - _g2calib_2_Hfunc(d - 0.01 / 2)) / 0.01
+        term = (_g2calib_2_Hfunc(d + 0.001 / 2) - _g2calib_2_Hfunc(d - 0.001 / 2)) / 0.001
 
     return offset + height*term
 
@@ -3601,8 +3958,8 @@ def g2_plot(results, show=True):
     centers = results["centers"]
     H = results["histogram"]
     T_acq_s = results["T_acq_s"]
-    chA = results["chA"]
-    chB = results["chB"]
+    # chA = results["chA"]
+    # chB = results["chB"]
 
     # ---------------- Plot single photon count trend ----------------
     plt.figure()
@@ -3610,13 +3967,13 @@ def g2_plot(results, show=True):
     plt.ylim(bottom=0)
     plt.xlabel("Time bin index")
     plt.ylabel("Counts per bin")
-    plt.title(f"Single photon counts on channel {chA}")
+    plt.title(f"Single photon counts on channel 1")
     plt.grid(True)
 
     # ---------------- Plot coincidence histogram ----------------
     plt.figure()
     plt.plot(centers, H / T_acq_s, linewidth=1.5)
-    plt.xlabel(f"Time Delay t{chB} - t{chA} (ns)")
+    plt.xlabel(f"Time Delay t2 - t1 (ns)")
     plt.ylabel("Coincidence rate (per second)")
     plt.grid(True)
 
