@@ -47,10 +47,10 @@ class TimetagToH5SepTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
             source = Path(directory) / "recording.ttbin"
             source.touch()
-            hh_source = Path(directory) / "recording_HH.h5"
-            with h5py.File(hh_source, "w") as h5:
-                h5["t_ps"] = np.array([50, 60, 80], dtype=np.int64)
-                h5["ch"] = np.array([0, 2, 0], dtype=np.uint8)
+            hh_source = Path(directory) / "recording_qsfp.bin"
+            # Sync events map to channel 0; raw input 1 maps to channel 2.
+            np.array([(1 << 31) | 50, (1 << 25) | 60, (1 << 31) | 80],
+                     dtype="<u4").tofile(hh_source)
 
             with patch(
                 "qcs_analyzer._implementation.TimeTagger",
@@ -84,10 +84,8 @@ class TimetagToH5SepTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
             source = Path(directory) / "recording.ttbin"
             source.touch()
-            hh_source = Path(directory) / "recording_HH.h5"
-            with h5py.File(hh_source, "w") as h5:
-                h5["t_ps"] = np.array([60], dtype=np.int64)
-                h5["ch"] = np.array([2], dtype=np.uint8)
+            hh_source = Path(directory) / "recording_qsfp.bin"
+            np.array([(1 << 25) | 60], dtype="<u4").tofile(hh_source)
             output = Path(directory) / "recording_sep.h5"
             output.touch()
 

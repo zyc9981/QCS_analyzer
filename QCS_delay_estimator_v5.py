@@ -28,11 +28,10 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 
 
 if __name__ == "__main__":
-    # timetag_to_h5(sort_by_timestamp=False)
-    # timetag_to_h5_sep()
+    timetag_to_h5_sep()
     # timetag_to_h5_TTXonly()
     # trancate_timetag(600)
-    # sys.exit()
+    sys.exit()
 
     # results = load_g2_results()
     # fit = fit_g2(

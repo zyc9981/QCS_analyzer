@@ -25,6 +25,14 @@ command.
 
 ## Python imports
 
+In v5, `timetag_to_h5_sep("recording.ttbin")` reads the matching
+`recording_qsfp.bin` (also accepts `recording.qsfp.bin`) as raw HydraHarp V2
+T2 data and writes `recording_sep.h5` with separate `t1_ps`/`ch1` and
+`t2_ps`/`ch2` streams. It unfolds timestamp overflows and retains photon
+and sync events, aligning each stream's first trigger to zero. The raw
+HH base resolution defaults to 1 ps; set `hydraharp_base_resolution_ps`
+if the recording uses a different integer picosecond resolution.
+
 Use the focused modules in new notebooks and scripts:
 
 ```python

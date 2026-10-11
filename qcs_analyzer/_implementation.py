@@ -407,6 +407,59 @@ def _matching_hydraharp_h5_filename(filename):
     return source_path.with_name(f"{source_path.stem}_HH.h5")
 
 
+def _matching_hydraharp_qsfp_filename(filename):
+    """Find the matching QSFP recording, preferring the _qsfp.bin spelling."""
+    source_path = Path(filename)
+    path = source_path.with_name(f"{source_path.stem}_qsfp.bin")
+    controller_path = source_path.with_suffix(".qsfp.bin")
+    return controller_path if not path.is_file() and controller_path.is_file() else path
+
+
+def _iter_hydraharp_qsfp_chunks(
+    filename, chunk_size, channel_offset=0, base_resolution_ps=1,
+):
+    """Decode headerless little-endian HydraHarp V2 T2 records in chunks.
+
+    Sync is channel 0 and regular inputs start at 1, matching snAPI.
+    Overflow records extend timestamps; overflow and marker records are
+    excluded from the physical-input stream. Format reference:
+    https://picoquant.github.io/snAPI/tttr%20data%20format.html
+    """
+    if not isinstance(chunk_size, (int, np.integer)) or chunk_size <= 0:
+        raise ValueError("chunk_size must be a positive integer.")
+    resolution = float(base_resolution_ps)
+    if not np.isfinite(resolution) or resolution <= 0 or not resolution.is_integer():
+        raise ValueError("hydraharp_base_resolution_ps must be a positive integer in ps.")
+    if Path(filename).stat().st_size % 4:
+        raise ValueError(f"HydraHarp QSFP file ends with an incomplete 32-bit T2 record: {filename}")
+
+    overflow_correction = 0
+    with open(filename, "rb") as stream:
+        while True:
+            records = np.fromfile(stream, dtype="<u4", count=int(chunk_size))
+            if not len(records):
+                break
+            special = (records >> 31) != 0
+            channels = (records >> 25) & 0x3F
+            timetags = (records & 0x1FFFFFF).astype(np.int64)
+            overflow = special & (channels == 63)
+            overflow_counts = np.where(overflow, np.maximum(timetags, 1), 0)
+            corrections = np.cumsum(overflow_counts, dtype=np.int64) * (1 << 25)
+            corrections += overflow_correction
+            overflow_correction = int(corrections[-1])
+            events = ~special | (channels == 0)
+            if not np.any(events):
+                continue
+            times = (timetags + corrections)[events]
+            if times.max() > np.iinfo(np.int64).max // int(resolution):
+                raise ValueError("HydraHarp timestamps exceed the int64 picosecond range.")
+            times *= int(resolution)
+            event_channels = channels[events].astype(np.int64)
+            event_channels += (~special[events]).astype(np.int64)
+            event_channels += int(channel_offset)
+            yield times, event_channels
+
+
 def _iter_h5_timetag_chunks(
     filename,
     chunk_size,
@@ -989,11 +1042,16 @@ def timetag_to_h5_sep(
     hydraharp_channel_offset=5,
     ch_trig_time_tagger=3,
     ch_trig_hh=7,
+    hydraharp_base_resolution_ps=1,
 ):
     """Save Time Tagger X and HydraHarp events as separate HDF5 streams.
 
     ``t1_ps``/``ch1`` contain Time Tagger X events and ``t2_ps``/``ch2``
-    contain HydraHarp events. Channels are normalized/offset exactly as in
+    contain HydraHarp events decoded from the matching ``_qsfp.bin`` file
+    (also accepting the controller's ``.qsfp.bin`` spelling). Raw input must
+    use HydraHarp V2 T2 format; its base resolution defaults to 1 ps and can
+    be set with ``hydraharp_base_resolution_ps``. Overflow and marker records
+    are excluded. Channels are normalized/offset exactly as in
     :func:`timetag_to_h5`, and each source's first trigger is rebased to zero.
     Events remain in their source order; the two streams are never merged.
     The separate layout is not accepted by the existing ``load_timetag`` or
@@ -1018,19 +1076,12 @@ def timetag_to_h5_sep(
         print(f"Using FileWriter sequence header: {time_tagger_path}")
 
     if hydraharp_filename is None:
-        hydraharp_filename = _matching_hydraharp_h5_filename(time_tagger_path)
+        hydraharp_filename = _matching_hydraharp_qsfp_filename(time_tagger_path)
     hydraharp_path = Path(hydraharp_filename)
     if not hydraharp_path.is_file():
         raise FileNotFoundError(
-            f"Matching HydraHarp H5 file was not found: {hydraharp_path}"
+            f"Matching HydraHarp QSFP binary file was not found: {hydraharp_path}"
         )
-    with h5py.File(hydraharp_path, "r") as hh_h5:
-        if "t_ps" not in hh_h5 or "ch" not in hh_h5:
-            raise ValueError(f"HydraHarp H5 is missing t_ps and/or ch: {hydraharp_path}")
-        if len(hh_h5["t_ps"]) != len(hh_h5["ch"]):
-            raise ValueError(f"HydraHarp H5 t_ps/ch lengths differ: {hydraharp_path}")
-        if len(hh_h5["t_ps"]) == 0:
-            raise ValueError(f"HydraHarp H5 contains no timetag records: {hydraharp_path}")
 
     if output_filename is None:
         output_filename = time_tagger_path.with_name(f"{time_tagger_path.stem}_sep.h5")
@@ -1047,10 +1098,11 @@ def timetag_to_h5_sep(
         "Time Tagger X",
     )
     hydraharp_initial_trigger_t_ps = _initial_t_ps_for_channel(
-        _iter_h5_timetag_chunks(
+        _iter_hydraharp_qsfp_chunks(
             hydraharp_path,
             chunk_size=chunk_size,
             channel_offset=hydraharp_channel_offset,
+            base_resolution_ps=hydraharp_base_resolution_ps,
         ),
         ch_trig_hh,
         "HydraHarp",
@@ -1110,7 +1162,8 @@ def timetag_to_h5_sep(
         return count, removed
 
     with h5py.File(output_path, "x") as h5:
-        h5.attrs["source_format"] = "timetagger_x_ttbin_plus_hydraharp_h5_separate"
+        h5.attrs["source_format"] = "timetagger_x_ttbin_plus_hydraharp_qsfp_t2_separate"
+        h5.attrs["hydraharp_base_resolution_ps"] = int(hydraharp_base_resolution_ps)
         h5.attrs["timestamp_unit"] = "ps"
         h5.attrs["channel_dtype"] = "uint8"
         h5.attrs["time_tagger_x_source_filename"] = str(time_tagger_path)
@@ -1139,10 +1192,11 @@ def timetag_to_h5_sep(
             "t2_ps",
             "ch2",
             _offset_timetag_chunks(
-                _iter_h5_timetag_chunks(
+                _iter_hydraharp_qsfp_chunks(
                     hydraharp_path,
                     chunk_size=chunk_size,
                     channel_offset=hydraharp_channel_offset,
+                    base_resolution_ps=hydraharp_base_resolution_ps,
                 ),
                 time_offset_ps=hydraharp_time_offset_ps,
             ),
