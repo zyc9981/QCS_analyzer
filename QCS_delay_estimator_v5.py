@@ -28,10 +28,10 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 
 
 if __name__ == "__main__":
-    timetag_to_h5_sep()
+    # timetag_to_h5_sep()
     # timetag_to_h5_TTXonly()
     # trancate_timetag(600)
-    sys.exit()
+    # sys.exit()
 
     # results = load_g2_results()
     # fit = fit_g2(
@@ -93,15 +93,15 @@ if __name__ == "__main__":
     t1_ps, ch1, t2_ps, ch2, filename = load_timetag_sep()
     print(r"Data import complete.")
 
-    adev_result = allan_deviation_estimator_sep(t1_ps, ch1, t2_ps, ch2, number_of_tau_points=500, ch_clk_0=3, ch_clk_1=7)
-    save_dict_npz(adev_result)
+    # adev_result = allan_deviation_estimator_sep(t1_ps, ch1, t2_ps, ch2, number_of_tau_points=500, ch_clk_0=3, ch_clk_1=7)
+    # save_dict_npz(adev_result)
 
     # qcs_result = load_dict_npz()
     # adev_result = allan_deviation_estimator_tau_input(qcs_result["tau_ref"], qcs_result["center"], number_of_tau_points=200)
     # # save_dict_npz(adev_result)
     # adev_result = allan_deviation_estimator_tau_input(qcs_result["tau"], qcs_result["center"], number_of_tau_points=200)
     # # save_dict_npz(adev_result)
-    sys.exit()
+    # sys.exit()
 
     t1_ps, ch1, t2_ps, ch2, details = timetag_correction_sep(
         t1_ps, ch1, t2_ps, ch2,
@@ -121,57 +121,27 @@ if __name__ == "__main__":
     # print(f"Reference jitter: {ref_jitter:.8g}")
     # sys.exit()
 
-    # Ta_s = 1.0
-    # qcs_result = qcs_kernal_sep(
-    #     t1_ps,
-    #     ch1,
-    #     t2_ps,
-    #     ch2,
-
-    #     Ta_s_init=Ta_s,
-    #     tau_ps_init=62200,
-    #     tau_rt_ps_init=107400,
-
-    #     fit_curve="g2calib_2",
-    #     # time_bin_ps_init=100,
-    #     time_bin_ps_init=20,
-    #     # Ta_s_max=10,
-    #     Ta_s_max=Ta_s,
-    #     # tau_span_ps_init=120e3,
-
-    #     # Ta_ref_s=0.1,
-    #     Ta_ref_s=Ta_s,
-    #     # show_fit=True,
-    #     # second_order_fit=True,
-
-    #     Ta_rt_s_max=Ta_s,
-
-    #     Freq = 50e6,
-    # )
-    Ta_s = 3
+    Ta_s = 3.0
     qcs_result = qcs_kernal_sep(
         t1_ps,
         ch1,
         t2_ps,
         ch2,
 
-        ch_0 = 3,
-        ch_1 = 7,
-        ch_2 = 3,
-
-        fit_parameters={"height": 4000,"sigma": 10,"offset": 0.01 },
-
         Ta_s_init=Ta_s,
-        tau_ps_init=0.038,
-        tau_rt_ps_init=0.0,
- 
-        fit_curve="gaussian",
-        time_bin_ps_init=10,
+        tau_ps_init=11129500,
+        tau_rt_ps_init=107400,
+
+        fit_curve="g2calib_2",
+        time_bin_ps_init=20,
+        # Ta_s_max=10,
         Ta_s_max=Ta_s,
+        # tau_span_ps_init=120e3,
 
         # Ta_ref_s=0.1,
         Ta_ref_s=Ta_s,
         # show_fit=True,
+        # second_order_fit=True,
 
         Ta_rt_s_max=Ta_s,
 
@@ -201,24 +171,24 @@ if __name__ == "__main__":
     # fig1.tight_layout()
     # plt.show()
 
-    # sys.exit()
+    sys.exit()
 
-    # results = g2_process_sep(
-    #     t1_ps[ch1==3],
-    #     t2_ps[ch2==7],
-    #     # t_center=107.4,
-    #     t_center=0,
-    #     # t_center=45.75,
-    #     # t_center=-0.025,
-    #     # t_stop=600,
-    #     t_span=10,
-    #     time_bin=0.001,
-    #     # time_bin=2,
-    #     sig_half=5.0,
-    #     freq=50e6,
-    #     filename=filename,
-    # )
-    # g2_plot(results=results)
+    results = g2_process_sep(
+        t1_ps[ch1==1],
+        t2_ps[ch2==6],
+        # t_center=107.4,
+        t_center=11129,
+        # t_center=45.75,
+        # t_center=-0.025,
+        t_stop=10,
+        t_span=5,
+        time_bin=0.02,
+        # time_bin=2,
+        sig_half=5.0,
+        freq=50e6,
+        filename=filename,
+    )
+    g2_plot(results=results)
     # save_g2_results(results)
 
     # load_time_dependent_results()
