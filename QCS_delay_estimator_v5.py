@@ -121,7 +121,7 @@ if __name__ == "__main__":
     # print(f"Reference jitter: {ref_jitter:.8g}")
     # sys.exit()
 
-    Ta_s = 3.0
+    Ta_s = 7.0
     qcs_result = qcs_kernal_sep(
         t1_ps,
         ch1,
