@@ -121,33 +121,33 @@ if __name__ == "__main__":
     # print(f"Reference jitter: {ref_jitter:.8g}")
     # sys.exit()
 
-    Ta_s = 7.0
-    qcs_result = qcs_kernal_sep(
-        t1_ps,
-        ch1,
-        t2_ps,
-        ch2,
+    # Ta_s = 3.0
+    # qcs_result = qcs_kernal_sep(
+    #     t1_ps,
+    #     ch1,
+    #     t2_ps,
+    #     ch2,
 
-        Ta_s_init=Ta_s,
-        tau_ps_init=11129500,
-        tau_rt_ps_init=107400,
+    #     Ta_s_init=Ta_s,
+    #     tau_ps_init=11153200,
+    #     tau_rt_ps_init=107400,
 
-        fit_curve="g2calib_2",
-        time_bin_ps_init=20,
-        # Ta_s_max=10,
-        Ta_s_max=Ta_s,
-        # tau_span_ps_init=120e3,
+    #     fit_curve="g2calib_2",
+    #     time_bin_ps_init=20,
+    #     # Ta_s_max=10,
+    #     Ta_s_max=Ta_s,
+    #     # tau_span_ps_init=120e3,
 
-        # Ta_ref_s=0.1,
-        Ta_ref_s=Ta_s,
-        # show_fit=True,
-        # second_order_fit=True,
+    #     # Ta_ref_s=0.1,
+    #     Ta_ref_s=Ta_s,
+    #     # show_fit=True,
+    #     # second_order_fit=True,
 
-        Ta_rt_s_max=Ta_s,
+    #     Ta_rt_s_max=Ta_s,
 
-        Freq = 50e6,
-    )
-    save_dict_npz(qcs_result)
+    #     Freq = 50e6,
+    # )
+    # save_dict_npz(qcs_result)
 
     # qcs_results = load_dict_npz()
     # fig1, axes = plt.subplots(3, 1, sharex=True, squeeze=False)
@@ -180,8 +180,8 @@ if __name__ == "__main__":
         t_center=11129,
         # t_center=45.75,
         # t_center=-0.025,
-        t_stop=10,
-        t_span=5,
+        t_stop=60,
+        t_span=500,
         time_bin=0.02,
         # time_bin=2,
         sig_half=5.0,
