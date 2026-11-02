@@ -10,6 +10,7 @@ from ._implementation import (
     timetag_to_h5_qutag,
     trancate_timetag,
     truncate_timetag,
+    truncate_timetag_sep,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "timetag_to_h5_qutag",
     "trancate_timetag",
     "truncate_timetag",
+    "truncate_timetag_sep",
 ]

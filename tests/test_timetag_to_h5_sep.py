@@ -47,7 +47,7 @@ class TimetagToH5SepTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
             source = Path(directory) / "recording.ttbin"
             source.touch()
-            hh_source = Path(directory) / "recording_qsfp.bin"
+            hh_source = Path(directory) / "recording.internet.bin"
             # Sync events map to channel 0; raw input 1 maps to channel 2.
             np.array([(1 << 31) | 50, (1 << 25) | 60, (1 << 31) | 80],
                      dtype="<u4").tofile(hh_source)
@@ -84,7 +84,7 @@ class TimetagToH5SepTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
             source = Path(directory) / "recording.ttbin"
             source.touch()
-            hh_source = Path(directory) / "recording_qsfp.bin"
+            hh_source = Path(directory) / "recording.internet.bin"
             np.array([(1 << 25) | 60], dtype="<u4").tofile(hh_source)
             output = Path(directory) / "recording_sep.h5"
             output.touch()

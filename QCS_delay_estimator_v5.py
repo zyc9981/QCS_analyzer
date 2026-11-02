@@ -30,7 +30,7 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 if __name__ == "__main__":
     # timetag_to_h5_sep()
     # timetag_to_h5_TTXonly()
-    # trancate_timetag(600)
+    # truncate_timetag_sep(600)
     # sys.exit()
 
     # results = load_g2_results()
@@ -38,11 +38,12 @@ if __name__ == "__main__":
     #     results,
     #     curve="expogaussconv",
     #     parameters={
-    #         "center": 45.75,
+    #         # "center": 67.7,
+    #         "center": 107.32,
     #         "height": 100,
     #         "gamma": 0.1,
     #         "sigma": 0.02,
-    #         "offset": 0.1,
+    #         "offset": 1,
     #     },
     #     fit_window=8,
     #     use_rate=50e6,
@@ -50,6 +51,7 @@ if __name__ == "__main__":
     # )
     # print(f"sigma: {fit["parameters"]["sigma"]:.8g}", f"gamma: {fit["parameters"]["gamma"]:.8g}", f"center: {fit["parameters"]["center"]:.8g}")
     # sys.exit()
+    # region Gauss Fit
     # fit = fit_g2(
     #     results,
     #     curve="gaussian",
@@ -65,6 +67,7 @@ if __name__ == "__main__":
     # )
     # print(f"sigma: {fit["parameters"]["sigma"]:.8g}")
     # sys.exit()
+    # endregion
 
     # qcs_results = load_dict_npz()
     # tau_diff = qcs_results["tau_diff"]
@@ -121,7 +124,7 @@ if __name__ == "__main__":
     # print(f"Reference jitter: {ref_jitter:.8g}")
     # sys.exit()
 
-    # Ta_s = 3.0
+    # Ta_s = 5.0
     # qcs_result = qcs_kernal_sep(
     #     t1_ps,
     #     ch1,
@@ -129,8 +132,8 @@ if __name__ == "__main__":
     #     ch2,
 
     #     Ta_s_init=Ta_s,
-    #     tau_ps_init=11153200,
-    #     tau_rt_ps_init=107400,
+    #     tau_ps_init=24665400,
+    #     tau_rt_ps_init=49302500,
 
     #     fit_curve="g2calib_2",
     #     time_bin_ps_init=20,
@@ -143,9 +146,13 @@ if __name__ == "__main__":
     #     # show_fit=True,
     #     # second_order_fit=True,
 
+    #     # Ta_rt_s_max=30,
     #     Ta_rt_s_max=Ta_s,
 
     #     Freq = 50e6,
+
+    #     T_calib = 67758.085,
+    #     T_calib_rt = 107332.02,
     # )
     # save_dict_npz(qcs_result)
 
@@ -172,16 +179,16 @@ if __name__ == "__main__":
     # plt.show()
 
     sys.exit()
-
     results = g2_process_sep(
         t1_ps[ch1==1],
-        t2_ps[ch2==6],
-        # t_center=107.4,
-        t_center=11129,
-        # t_center=45.75,
-        # t_center=-0.025,
-        t_stop=60,
-        t_span=500,
+        # t2_ps[ch2==6],
+        t1_ps[ch1==2],
+        # t_center=67.754,
+        # t_center=107.32,
+        # t_center=24681.4,
+        t_center=49302.9,
+        t_stop=120,
+        t_span=50,
         time_bin=0.02,
         # time_bin=2,
         sig_half=5.0,
@@ -189,6 +196,20 @@ if __name__ == "__main__":
         filename=filename,
     )
     g2_plot(results=results)
-    # save_g2_results(results)
+    save_g2_results(results)
+
+    # results = g2_process_sep(
+    #     t1_ps[ch1==3],
+    #     t2_ps[ch2==7],
+    #     t_center=0.0,
+    #     # t_stop=120,
+    #     t_span=50,
+    #     time_bin=0.005,
+    #     # time_bin=2,
+    #     sig_half=5.0,
+    #     freq=50e6,
+    #     filename=filename,
+    # )
+    # g2_plot(results=results)
 
     # load_time_dependent_results()

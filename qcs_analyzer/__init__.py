@@ -38,6 +38,7 @@ from .io import (
     timetag_to_h5_qutag,
     trancate_timetag,
     truncate_timetag,
+    truncate_timetag_sep,
 )
 from .plotting import g2_plot, plot_photon_count, plot_qcs_delay_results
 from .results import (
@@ -82,4 +83,5 @@ __all__ = [
     "timetag_to_h5_qutag",
     "trancate_timetag",
     "truncate_timetag",
+    "truncate_timetag_sep",
 ]

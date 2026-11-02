@@ -408,11 +408,9 @@ def _matching_hydraharp_h5_filename(filename):
 
 
 def _matching_hydraharp_qsfp_filename(filename):
-    """Find the matching QSFP recording, preferring the _qsfp.bin spelling."""
+    """Find the matching HydraHarp binary recording."""
     source_path = Path(filename)
-    path = source_path.with_name(f"{source_path.stem}_qsfp.bin")
-    controller_path = source_path.with_suffix(".qsfp.bin")
-    return controller_path if not path.is_file() and controller_path.is_file() else path
+    return source_path.with_name(f"{source_path.stem}.internet.bin")
 
 
 def _iter_hydraharp_qsfp_chunks(
@@ -1047,15 +1045,14 @@ def timetag_to_h5_sep(
     """Save Time Tagger X and HydraHarp events as separate HDF5 streams.
 
     ``t1_ps``/``ch1`` contain Time Tagger X events and ``t2_ps``/``ch2``
-    contain HydraHarp events decoded from the matching ``_qsfp.bin`` file
-    (also accepting the controller's ``.qsfp.bin`` spelling). Raw input must
+    contain HydraHarp events decoded from the matching ``.internet.bin`` file. Raw input must
     use HydraHarp V2 T2 format; its base resolution defaults to 1 ps and can
     be set with ``hydraharp_base_resolution_ps``. Overflow and marker records
     are excluded. Channels are normalized/offset exactly as in
     :func:`timetag_to_h5`, and each source's first trigger is rebased to zero.
     Events remain in their source order; the two streams are never merged.
-    The separate layout is not accepted by the existing ``load_timetag`` or
-    ``truncate_timetag`` functions, which expect ``t_ps``/``ch`` datasets.
+    Use ``load_timetag_sep`` and ``truncate_timetag_sep`` for this layout;
+    ``load_timetag`` and ``truncate_timetag`` expect ``t_ps``/``ch`` datasets.
     """
     if not isinstance(chunk_size, (int, np.integer)) or chunk_size <= 0:
         raise ValueError("chunk_size must be a positive integer.")
@@ -1080,7 +1077,7 @@ def timetag_to_h5_sep(
     hydraharp_path = Path(hydraharp_filename)
     if not hydraharp_path.is_file():
         raise FileNotFoundError(
-            f"Matching HydraHarp QSFP binary file was not found: {hydraharp_path}"
+            f"Matching HydraHarp .internet.bin file was not found: {hydraharp_path}"
         )
 
     if output_filename is None:
@@ -2235,6 +2232,105 @@ def truncate_timetag(
 trancate_timetag = truncate_timetag
 
 
+def truncate_timetag_sep(
+    t_truncate,
+    filename=None,
+    chunk_size=1_000_000,
+    compression="gzip",
+):
+    """Save both separate HDF5 streams through ``t_truncate`` seconds.
+
+    Input must contain chronological ``t1_ps``/``ch1`` and ``t2_ps``/``ch2``
+    datasets, as written by :func:`timetag_to_h5_sep`. Each stream is copied
+    in chunks, keeping timestamps <= ``t_truncate * 1e12`` without rebasing
+    them. The cutoff is measured from timestamp zero, not the first event.
+    The output preserves the separate layout, dtypes, and attributes and is
+    saved beside the source as ``<source>_truncated_<t_truncate>s.h5``.
+    """
+    try:
+        t_truncate = float(t_truncate)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("t_truncate must be a positive number of seconds.") from exc
+    if not np.isfinite(t_truncate) or t_truncate <= 0:
+        raise ValueError("t_truncate must be a positive number of seconds.")
+    if not isinstance(chunk_size, (int, np.integer)) or chunk_size <= 0:
+        raise ValueError("chunk_size must be a positive integer.")
+
+    if filename is None:
+        filename = _open_file_dialog(
+            "Select separate-stream timetag H5 file to truncate",
+            [("HDF5 files", "*.h5 *.hdf5"), ("All files", "*.*")],
+        )
+    filename = _require_selected_filename(filename, "separate-stream timetag H5 file")
+    source_path = Path(filename)
+    cutoff_ps = t_truncate * 1e12
+    cutoff_label = format(t_truncate, ".12g")
+    output_filename = source_path.with_name(
+        f"{source_path.stem}_truncated_{cutoff_label}s.h5"
+    )
+    if output_filename.exists():
+        raise FileExistsError(
+            f"Refusing to overwrite existing truncated file: {output_filename}"
+        )
+
+    kept_counts = []
+    with h5py.File(source_path, "r") as source_h5:
+        required = ("t1_ps", "ch1", "t2_ps", "ch2")
+        missing = [name for name in required if name not in source_h5]
+        if missing:
+            raise ValueError(
+                "Separate-stream H5 file is missing dataset(s): " + ", ".join(missing)
+            )
+        if any(source_h5[name].ndim != 1 for name in required):
+            raise ValueError("Separate-stream timetag datasets must be one-dimensional.")
+        for time_name, channel_name in (("t1_ps", "ch1"), ("t2_ps", "ch2")):
+            if len(source_h5[time_name]) != len(source_h5[channel_name]):
+                raise ValueError(
+                    f"{time_name} and {channel_name} must contain the same number of records."
+                )
+
+        with h5py.File(output_filename, "x") as output_h5:
+            output_h5.attrs.update(source_h5.attrs)
+            output_h5.attrs["source_filename"] = str(source_path)
+            output_h5.attrs["t_truncate_s"] = t_truncate
+            output_h5.attrs["t_truncate_ps"] = cutoff_ps
+            for time_name, channel_name in (("t1_ps", "ch1"), ("t2_ps", "ch2")):
+                source_time = source_h5[time_name]
+                source_channel = source_h5[channel_name]
+                for name in (time_name, channel_name):
+                    dataset = output_h5.create_dataset(
+                        name,
+                        shape=(0,),
+                        maxshape=(None,),
+                        dtype=source_h5[name].dtype,
+                        chunks=(min(int(chunk_size), 1_000_000),),
+                        compression=compression,
+                    )
+                    dataset.attrs.update(source_h5[name].attrs)
+                output_time = output_h5[time_name]
+                output_channel = output_h5[channel_name]
+                for start in range(0, len(source_time), int(chunk_size)):
+                    time_chunk = np.asarray(source_time[start:start + int(chunk_size)])
+                    keep_count = int(np.searchsorted(time_chunk, cutoff_ps, side="right"))
+                    if keep_count:
+                        n_old = len(output_time)
+                        n_new = n_old + keep_count
+                        output_time.resize(n_new, axis=0)
+                        output_channel.resize(n_new, axis=0)
+                        output_time[n_old:n_new] = time_chunk[:keep_count]
+                        output_channel[n_old:n_new] = source_channel[start:start + keep_count]
+                    if keep_count < len(time_chunk):
+                        break
+                kept_counts.append(len(output_time))
+
+    print(f"Saved truncated separate-stream H5 file: {output_filename}")
+    print(
+        f"Kept tags through {t_truncate:g} s ({cutoff_ps:g} ps): "
+        f"stream 1: {kept_counts[0]:,}, stream 2: {kept_counts[1]:,}."
+    )
+    return str(output_filename)
+
+
 # =============================================================================
 # PHOTON COUNTING AND FIXED-WINDOW G2 PROCESSING
 # =============================================================================
@@ -3233,7 +3329,11 @@ def fit_g2(results, curve, parameters, *, fit_window=None, use_rate=True, show=T
             else f"{definition['label']} input curve (fit failed)"
         )
         ax.plot(x_fit, y_fit, "-", linewidth=2, label=fit_label)
-        ax.set_xlabel(f"Time Delay t{results['chB']} - t{results['chA']} (ns)")
+        if "chA" in results and "chB" in results:
+            delay_label = f"Time Delay t{results['chB']} - t{results['chA']} (ns)"
+        else:
+            delay_label = "Time Delay t2 - t1 (ns)"
+        ax.set_xlabel(delay_label)
         ax.set_ylabel(y_label)
         ax.grid(True)
         ax.legend(["Data", "Fitting"])

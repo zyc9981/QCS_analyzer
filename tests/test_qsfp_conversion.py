@@ -35,32 +35,29 @@ class QsfpConversionTests(unittest.TestCase):
                         np.concatenate([ch for _, ch in chunks]), [6, 5, 7, 6],
                     )
 
-    def test_separate_conversion_alignment_and_filename_spellings(self):
+    def test_separate_conversion_alignment_with_bin_input(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "recording.ttbin"
             source.touch()
-            for suffix in ("_qsfp.bin", ".qsfp.bin"):
-                with self.subTest(suffix=suffix):
-                    hh_path = source.with_name(source.stem + suffix)
-                    np.array([word(0, 90), word(1, 100), word(0, 110)], dtype="<u4").tofile(hh_path)
-                    output = Path(directory) / (suffix + ".h5")
+            hh_path = source.with_name(source.stem + ".internet.bin")
+            np.array([word(0, 90), word(1, 100), word(0, 110)], dtype="<u4").tofile(hh_path)
+            output = Path(directory) / "converted.h5"
 
-                    def tt_chunks(*args, **kwargs):
-                        yield np.array([40, 50, 60]), np.array([1, 3, 1])
+            def tt_chunks(*args, **kwargs):
+                yield np.array([40, 50, 60]), np.array([1, 3, 1])
 
-                    with patch.object(impl, "_iter_timetagger_ttbin_chunks", tt_chunks):
-                        impl.timetag_to_h5_sep(source, output, chunk_size=1, progress_every=0)
-                    with h5py.File(output) as h5:
-                        self.assertEqual(set(h5), {"t1_ps", "ch1", "t2_ps", "ch2"})
-                        np.testing.assert_array_equal(h5["t1_ps"][:], [0, 10])
-                        np.testing.assert_array_equal(h5["ch1"][:], [3, 1])
-                        np.testing.assert_array_equal(h5["t2_ps"][:], [0, 10])
-                        np.testing.assert_array_equal(h5["ch2"][:], [7, 6])
-                        self.assertEqual(h5["t2_ps"].dtype, np.dtype("int64"))
-                        self.assertEqual(h5["ch2"].dtype, np.dtype("uint8"))
-                        self.assertEqual(h5.attrs["hydraharp_source_filename"], str(hh_path))
-                        self.assertEqual(h5.attrs["hydraharp_negative_timestamp_events_removed"], 1)
-                    hh_path.unlink()
+            with patch.object(impl, "_iter_timetagger_ttbin_chunks", tt_chunks):
+                impl.timetag_to_h5_sep(source, output, chunk_size=1, progress_every=0)
+            with h5py.File(output) as h5:
+                self.assertEqual(set(h5), {"t1_ps", "ch1", "t2_ps", "ch2"})
+                np.testing.assert_array_equal(h5["t1_ps"][:], [0, 10])
+                np.testing.assert_array_equal(h5["ch1"][:], [3, 1])
+                np.testing.assert_array_equal(h5["t2_ps"][:], [0, 10])
+                np.testing.assert_array_equal(h5["ch2"][:], [7, 6])
+                self.assertEqual(h5["t2_ps"].dtype, np.dtype("int64"))
+                self.assertEqual(h5["ch2"].dtype, np.dtype("uint8"))
+                self.assertEqual(h5.attrs["hydraharp_source_filename"], str(hh_path))
+                self.assertEqual(h5.attrs["hydraharp_negative_timestamp_events_removed"], 1)
 
     def test_truncated_record_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

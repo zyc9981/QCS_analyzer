@@ -850,6 +850,9 @@ def qcs_kernal_sep(
     second_order_fit=False,
     show_fit=False,
     Freq=50e6,
+
+    T_calib = 0.0,
+    T_calib_rt = 0.0,
 ):
     """
     Chronologically scan paired-channel data in adaptive Ta intervals.
@@ -1220,7 +1223,8 @@ def qcs_kernal_sep(
         tau_rt_ps_records[acquisition_index] = fit_rt["center"]
         Ta_s_records[acquisition_index] = state["Ta_s"]
         Ta_rt_s_records[acquisition_index] = state["Ta_rt_s"]
-        epsilon_ps_records[acquisition_index] = fit["center"] - fit_rt["center"] / 2
+        # epsilon_ps_records[acquisition_index] = fit["center"] - fit_rt["center"] / 2
+        epsilon_ps_records[acquisition_index] = (fit["center"] - T_calib) - (fit_rt["center"] - T_calib_rt) / 2
         # fwhm_records[acquisition_index] = fwhm
         sigma_records[acquisition_index] = fit["parameters"]["sigma"]
         sigma_rt_records[acquisition_index] = fit_rt["parameters"]["sigma"]
@@ -1230,6 +1234,7 @@ def qcs_kernal_sep(
         CC_count_rt_records[acquisition_index] = np.sum(results_rt["histogram_raw"])
         # S_peak_records[acquisition_index] = np.sqrt(np.sum(results["histogram"]) ** 2 * np.size(results["centers"]) / np.size(acquisition_t_0) / np.size(acquisition_t_1))
 
+        # print(acquisition["point_ps"])
         tau_ref_ps, tau_ref_uncertainty_ps, N_ref_samples = qcs_ref_estimator(
             acquisition_ref_1 - acquisition_ref_0,
             acquisition_ref_0,
@@ -1286,8 +1291,8 @@ def qcs_kernal_sep(
                 Ta_rt_s = np.round((fwhm_calib_ps / 10 / np.abs(udrift_rt) * 1e-12) / Ta_s_init) * Ta_s_init
                 Ta_rt_s = np.min([Ta_rt_s, Ta_rt_s_max])
                 # state["Ta_rt_s"] = np.max([Ta_s_init, Ta_rt_s])
-                # state["Ta_rt_s"] = Ta_rt_s
-                state["Ta_rt_s"] = state["Ta_s"]
+                state["Ta_rt_s"] = Ta_rt_s
+                # state["Ta_rt_s"] = state["Ta_s"]
                 # time_bin_rt_ps = round(time_bin_ps_init / state["Ta_rt_s"] * Ta_s_init / 10.0) * 10.0
                 # state["time_bin_rt_ps"] = np.max([time_bin_rt_ps, time_bin_ps_min])
     
@@ -1407,7 +1412,7 @@ def qcs_kernal_sep(
     fig2.tight_layout()
 
     # Fig3: summaries
-    fig3, axes = plt.subplots(2, 1, sharex=True, squeeze=False)
+    fig3, axes = plt.subplots(3, 1, sharex=True, squeeze=False)
     axes = axes[:, 0]
 
     tau_diff = tau_ps_records - tau_ref_ps_records
@@ -1424,6 +1429,11 @@ def qcs_kernal_sep(
     ax2.set_ylabel(r"$\epsilon$ (ps)")
     ax2.grid(True)
 
+    ax3 = axes[2]
+    ax3.plot(point_records * 1e-12, epsilon_ps_records - tau_ref_ps_records, "o-")
+    ax3.set_ylabel(r"$\epsilon$ - $\tau_{diff}$ (ps)")
+    ax3.grid(True)
+
     # ax3 = axes[2]
     # ax3.plot(point_records * 1e-12, CC_count_records, "o-")
     # ax3.set_ylabel(r"CC")
@@ -1433,7 +1443,8 @@ def qcs_kernal_sep(
     fig3.tight_layout()
 
     print(np.std(tau_diff))
-    print(np.mean(tau_diff))
+    print(np.std(epsilon_ps_records - tau_ref_ps_records))
+    # print(np.mean(tau_diff))
 
     plt.show()
 
