@@ -19,10 +19,14 @@ import matplotlib.pyplot as plt
 from qcs_analyzer import *
 from qcs_analyzer import __all__ as _QCS_ANALYZER_PUBLIC_API
 from qcs_analyzer.analysis import g2_process_sep, timetag_correction_sep
-from qcs_analyzer.io import load_timetag_sep
+from qcs_analyzer.io import load_timetag, load_timetag_sep, timetag_to_h5_TTXonly
 from qcs_analyzer.results import save_time_dependent_results, save_dict_npz, load_dict_npz
 from qcs_analyzer.qcs_kernal import qcs_kernal_sep, qcs_plot
-from qcs_analyzer.allan_deviation import allan_deviation_estimator_sep, allan_deviation_estimator_tau_input
+from qcs_analyzer.allan_deviation import (
+    allan_deviation_estimator_sep,
+    allan_deviation_estimator_single_channel,
+    allan_deviation_estimator_tau_input,
+)
 
 __all__ = _QCS_ANALYZER_PUBLIC_API
 
@@ -31,6 +35,7 @@ if __name__ == "__main__":
     # timetag_to_h5_sep()
     # timetag_to_h5_TTXonly()
     # truncate_timetag_sep(600)
+    # truncate_timetag(30)
     # sys.exit()
 
     # results = load_g2_results()
@@ -92,9 +97,21 @@ if __name__ == "__main__":
     # qcs_plot(qcs_results)
     # sys.exit()
 
-    # t_ps, ch, filename = load_timetag(return_filename=True)
-    t1_ps, ch1, t2_ps, ch2, filename = load_timetag_sep()
+    t1_ps, ch1, filename = load_timetag(return_filename=True)
+    # t1_ps, ch1, t2_ps, ch2, filename = load_timetag_sep()
     print(r"Data import complete.")
+
+    # Single-channel ADEV against tagger 1's timebase, using uncorrected data.
+    # Set the actual pulse repetition frequency in Hz if known; None estimates it.
+    adev_result = allan_deviation_estimator_single_channel(
+        t1_ps,
+        ch1,
+        ch_clk=3,
+        nominal_frequency_hz=None,
+        number_of_tau_points=200,
+    )
+    save_dict_npz(adev_result)
+    sys.exit()  # The two-tagger correction/QCS workflow below needs other inputs.
 
     # adev_result = allan_deviation_estimator_sep(t1_ps, ch1, t2_ps, ch2, number_of_tau_points=500, ch_clk_0=3, ch_clk_1=7)
     # save_dict_npz(adev_result)
@@ -124,37 +141,37 @@ if __name__ == "__main__":
     # print(f"Reference jitter: {ref_jitter:.8g}")
     # sys.exit()
 
-    # Ta_s = 5.0
-    # qcs_result = qcs_kernal_sep(
-    #     t1_ps,
-    #     ch1,
-    #     t2_ps,
-    #     ch2,
+    Ta_s = 5.0
+    qcs_result = qcs_kernal_sep(
+        t1_ps,
+        ch1,
+        t2_ps,
+        ch2,
 
-    #     Ta_s_init=Ta_s,
-    #     tau_ps_init=24665400,
-    #     tau_rt_ps_init=49302500,
+        Ta_s_init=Ta_s,
+        tau_ps_init=24665400,
+        tau_rt_ps_init=49302500,
 
-    #     fit_curve="g2calib_2",
-    #     time_bin_ps_init=20,
-    #     # Ta_s_max=10,
-    #     Ta_s_max=Ta_s,
-    #     # tau_span_ps_init=120e3,
+        fit_curve="g2calib_2",
+        time_bin_ps_init=20,
+        # Ta_s_max=10,
+        Ta_s_max=Ta_s,
+        # tau_span_ps_init=120e3,
 
-    #     # Ta_ref_s=0.1,
-    #     Ta_ref_s=Ta_s,
-    #     # show_fit=True,
-    #     # second_order_fit=True,
+        # Ta_ref_s=0.1,
+        Ta_ref_s=Ta_s,
+        # show_fit=True,
+        # second_order_fit=True,
 
-    #     # Ta_rt_s_max=30,
-    #     Ta_rt_s_max=Ta_s,
+        # Ta_rt_s_max=30,
+        Ta_rt_s_max=Ta_s,
 
-    #     Freq = 50e6,
+        Freq = 50e6,
 
-    #     T_calib = 67758.085,
-    #     T_calib_rt = 107332.02,
-    # )
-    # save_dict_npz(qcs_result)
+        T_calib = 67758.085,
+        T_calib_rt = 107332.02,
+    )
+    save_dict_npz(qcs_result)
 
     # qcs_results = load_dict_npz()
     # fig1, axes = plt.subplots(3, 1, sharex=True, squeeze=False)

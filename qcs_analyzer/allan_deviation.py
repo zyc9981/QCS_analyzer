@@ -2,6 +2,72 @@ from qcs_analyzer._implementation import *
 import numpy as np
 import matplotlib.pyplot as plt
 
+
+def allan_deviation_estimator_single_channel(
+    t_ps,
+    ch,
+    ch_clk=3,
+    nominal_frequency_hz=None,
+    number_of_tau_points=30,
+    *,
+    show=True,
+):
+    """Measure periodic input stability relative to the raw tagger timebase.
+
+    Timestamps are in picoseconds. Every selected event must represent one
+    consecutive pulse of the same periodic train. If ``nominal_frequency_hz``
+    is omitted, use the median measured pulse interval as the nominal period.
+    Obvious missing/extra pulses are rejected, not interpolated. A fixed
+    frequency offset is retained in the time-error series; no drift fit or
+    clock correction is applied. The result includes tagger and input noise.
+    """
+    t_ps = np.asarray(t_ps).ravel()
+    ch = np.asarray(ch).ravel()
+    if len(t_ps) != len(ch):
+        raise ValueError("t_ps and ch must have the same length.")
+    if int(number_of_tau_points) != number_of_tau_points or number_of_tau_points < 1:
+        raise ValueError("number_of_tau_points must be a positive integer.")
+
+    timestamps = np.sort(t_ps[ch == ch_clk])
+    if len(timestamps) < 6:
+        raise ValueError("Need at least six pulses on the selected channel.")
+    if not np.all(np.isfinite(timestamps)):
+        raise ValueError("Selected timestamps must be finite.")
+
+    # Difference before converting integer timestamps to float, so a large
+    # absolute epoch does not discard picosecond interval information.
+    intervals_ps = np.diff(timestamps).astype(np.float64)
+    if not np.all(np.isfinite(intervals_ps)) or np.any(intervals_ps <= 0):
+        raise ValueError("Selected pulses must have strictly increasing timestamps.")
+    if nominal_frequency_hz is None:
+        period_ps = float(np.median(intervals_ps))
+    else:
+        nominal_frequency_hz = float(nominal_frequency_hz)
+        if not np.isfinite(nominal_frequency_hz) or nominal_frequency_hz <= 0:
+            raise ValueError("nominal_frequency_hz must be finite and positive.")
+        period_ps = 1e12 / nominal_frequency_hz
+    if not np.isfinite(period_ps) or period_ps <= 0:
+        raise ValueError("Nominal pulse period must be finite and positive.")
+    if np.any(intervals_ps < 0.5 * period_ps) or np.any(intervals_ps > 1.5 * period_ps):
+        raise ValueError(
+            "Pulse intervals differ from the nominal period by more than 50%; "
+            "check for missing/extra pulses or an incorrect nominal frequency."
+        )
+
+    # Equivalent to (t[n] - t[0]) - n*period, without subtracting large floats.
+    time_error_ps = np.concatenate(([0.0], np.cumsum(intervals_ps - period_ps)))
+    ideal_t_ps = np.arange(len(timestamps), dtype=np.float64) * period_ps
+    result = allan_deviation_estimator_tau_input(
+        time_error_ps,
+        ideal_t_ps,
+        number_of_tau_points=number_of_tau_points,
+        show=show,
+    )
+    result["channel"] = ch_clk
+    result["nominal_frequency_hz"] = 1e12 / period_ps
+    return result
+
+
 def allan_deviation_estimator(
     t_ps,
     ch,
@@ -186,6 +252,8 @@ def allan_deviation_estimator_tau_input(
     tau,
     T,
     number_of_tau_points=30,
+    *,
+    show=True,
 ):
     if len(tau) == 0:
         raise ValueError("tau array must not be empty.")
@@ -241,7 +309,8 @@ def allan_deviation_estimator_tau_input(
     axis.set_ylabel("Allan deviation")
     axis.grid(True, which="both")
     fig.tight_layout()
-    plt.show()
+    if show:
+        plt.show()
 
     return {
         "tau_s": tau_s,
