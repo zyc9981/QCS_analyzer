@@ -100,9 +100,9 @@ if __name__ == "__main__":
     t1_ps, ch1, filename = load_timetag(return_filename=True)
     # t1_ps, ch1, t2_ps, ch2, filename = load_timetag_sep()
     print(r"Data import complete.")
+    print(np.size(t1_ps)/(t1_ps[-1]-t1_ps[0])*1e12)
 
     # Single-channel ADEV against tagger 1's timebase, using uncorrected data.
-    # Set the actual pulse repetition frequency in Hz if known; None estimates it.
     adev_result = allan_deviation_estimator_single_channel(
         t1_ps,
         ch1,
@@ -111,7 +111,7 @@ if __name__ == "__main__":
         number_of_tau_points=200,
     )
     save_dict_npz(adev_result)
-    sys.exit()  # The two-tagger correction/QCS workflow below needs other inputs.
+    sys.exit()
 
     # adev_result = allan_deviation_estimator_sep(t1_ps, ch1, t2_ps, ch2, number_of_tau_points=500, ch_clk_0=3, ch_clk_1=7)
     # save_dict_npz(adev_result)
