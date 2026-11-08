@@ -45,6 +45,38 @@ results = g2_process(t_ps, ch, chA=1, chB=6)
 g2_plot(results)
 ```
 
+## Per-channel divider
+
+Keep one tag out of every `divider` tags independently on each channel:
+
+```python
+from qcs_analyzer.io import timetag_to_h5_divider
+
+output = timetag_to_h5_divider(divider=10)  # Select an input file by dialog.
+# Or: timetag_to_h5_divider("recording.h5", divider=10)
+```
+
+This accepts `.ttbin`, `.internet.bin`, `.h5`, `.hdf5`, `.npz`, and `.mat` inputs and writes
+`<recording>_div10.h5` with `t_ps` and `ch`. Each channel keeps tags 1, 11,
+21, etc. Counters persist across chunks, and retained timestamps stay unchanged.
+`divider=1` keeps all tags. Existing output files are never overwritten.
+For chronological input, `sort_by_timestamp=False` avoids loading the retained
+data into memory for a final sort.
+
+HydraHarp-only raw recordings can be divided directly:
+
+```python
+output = timetag_to_h5_divider(
+    "recording.internet.bin", divider=10, hydraharp_base_resolution_ps=1,
+)
+```
+
+Raw HydraHarp input uses headerless little-endian V2 T2 records. Set the base
+resolution to match the recording (default: 1 ps). Overflow records extend
+timestamps and markers are discarded. Sync remains channel 0, physical inputs
+start at channel 1, and the divider applies independently to each, including
+sync. No Time Tagger X file, channel offset, or trigger rebasing is required.
+
 ## Peak fitting
 
 Use one fitting function and select the curve with a parameter dictionary:

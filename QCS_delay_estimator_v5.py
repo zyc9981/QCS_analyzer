@@ -34,8 +34,8 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 if __name__ == "__main__":
     # timetag_to_h5_sep()
     # timetag_to_h5_TTXonly()
-    # truncate_timetag_sep(600)
-    # truncate_timetag(30)
+    # timetag_to_h5_divider(divider=10)
+    # truncate_timetag_sep(40)
     # sys.exit()
 
     # results = load_g2_results()
@@ -97,24 +97,31 @@ if __name__ == "__main__":
     # qcs_plot(qcs_results)
     # sys.exit()
 
-    t1_ps, ch1, filename = load_timetag(return_filename=True)
-    # t1_ps, ch1, t2_ps, ch2, filename = load_timetag_sep()
+    # t1_ps, ch1, filename = load_timetag(return_filename=True)
+    t1_ps, ch1, t2_ps, ch2, filename = load_timetag_sep()
     print(r"Data import complete.")
-    print(np.size(t1_ps)/(t1_ps[-1]-t1_ps[0])*1e12)
 
+    # region ADEV
     # Single-channel ADEV against tagger 1's timebase, using uncorrected data.
-    adev_result = allan_deviation_estimator_single_channel(
-        t1_ps,
-        ch1,
-        ch_clk=3,
-        nominal_frequency_hz=None,
-        number_of_tau_points=200,
-    )
-    save_dict_npz(adev_result)
-    sys.exit()
+    # adev_result = allan_deviation_estimator_single_channel(
+    #     t1_ps,
+    #     ch1,
+    #     ch_clk=2,
+    #     nominal_frequency_hz=None,
+    #     number_of_tau_points=200,
+    # )
+    # save_dict_npz({
+    #     key: value
+    #     for key, value in adev_result.items()
+    #     if key not in ("x_samples_ps", "figure", "axis")
+    # })
 
-    # adev_result = allan_deviation_estimator_sep(t1_ps, ch1, t2_ps, ch2, number_of_tau_points=500, ch_clk_0=3, ch_clk_1=7)
-    # save_dict_npz(adev_result)
+    # adev_result = allan_deviation_estimator_sep(t1_ps, ch1, t1_ps, ch1, number_of_tau_points=500, ch_clk_0=3, ch_clk_1=4)
+    # save_dict_npz({
+    #     key: value
+    #     for key, value in adev_result.items()
+    #     if key not in ("x_samples_ps", "figure", "axis")
+    # })
 
     # qcs_result = load_dict_npz()
     # adev_result = allan_deviation_estimator_tau_input(qcs_result["tau_ref"], qcs_result["center"], number_of_tau_points=200)
@@ -122,6 +129,7 @@ if __name__ == "__main__":
     # adev_result = allan_deviation_estimator_tau_input(qcs_result["tau"], qcs_result["center"], number_of_tau_points=200)
     # # save_dict_npz(adev_result)
     # sys.exit()
+    # endregion
 
     t1_ps, ch1, t2_ps, ch2, details = timetag_correction_sep(
         t1_ps, ch1, t2_ps, ch2,
@@ -141,7 +149,7 @@ if __name__ == "__main__":
     # print(f"Reference jitter: {ref_jitter:.8g}")
     # sys.exit()
 
-    Ta_s = 5.0
+    Ta_s = 1.0
     qcs_result = qcs_kernal_sep(
         t1_ps,
         ch1,
@@ -149,14 +157,15 @@ if __name__ == "__main__":
         ch2,
 
         Ta_s_init=Ta_s,
-        tau_ps_init=24665400,
-        tau_rt_ps_init=49302500,
+        # tau_ps_init=29489620,
+        tau_ps_init=28991684,
+        tau_rt_ps_init=58968630,
 
         fit_curve="g2calib_2",
         time_bin_ps_init=20,
         # Ta_s_max=10,
         Ta_s_max=Ta_s,
-        # tau_span_ps_init=120e3,
+        tau_span_ps_init=2000e3,
 
         # Ta_ref_s=0.1,
         Ta_ref_s=Ta_s,
@@ -202,10 +211,11 @@ if __name__ == "__main__":
         t1_ps[ch1==2],
         # t_center=67.754,
         # t_center=107.32,
-        # t_center=24681.4,
-        t_center=49302.9,
-        t_stop=120,
-        t_span=50,
+        # t_center=29489.62,
+        t_center=58968.63,
+        t_stop=10,
+        t_span=500,
+        # t_span=50,
         time_bin=0.02,
         # time_bin=2,
         sig_half=5.0,

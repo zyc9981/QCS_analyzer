@@ -1322,6 +1322,160 @@ def timetag_to_h5_TTXonly(
     return output_filename
 
 
+def timetag_to_h5_divider(
+    filename=None,
+    divider=10,
+    output_filename=None,
+    chunk_size=1_000_000,
+    compression="gzip",
+    progress_every=1_000_000,
+    sort_by_timestamp=True,
+    hydraharp_base_resolution_ps=1,
+):
+    """Save one tag out of every ``divider`` tags per channel to a new H5.
+
+    Read a Time Tagger X .ttbin sequence, a raw HydraHarp .internet.bin file,
+    or a standard H5/HDF5/NPZ/MAT file containing t_ps and ch.
+    Each channel independently keeps its first tag,
+    then tags 1+divider, 1+2*divider, etc., in input order. Counts continue
+    across chunks. Kept timestamps are unchanged; no second tagger is required.
+
+    HydraHarp input must be headerless little-endian V2 T2 data. Overflow
+    records extend timestamps, markers are discarded, and sync is channel 0
+    with physical inputs starting at 1 (no channel offset or time rebasing).
+    Set hydraharp_base_resolution_ps to the recording's resolution in integer
+    picoseconds; the default is 1 ps. Sync tags are divided independently too.
+
+    The default output is <recording>_div<divider>.h5. Existing outputs are
+    never overwritten. H5 and raw inputs are read in chunks; NPZ/MAT inputs
+    use the existing in-memory loader. Final sorting loads the retained data;
+    disable it for chronological inputs to limit memory use. Output retains
+    input numeric dtypes (raw inputs use int64 timestamps and uint8 channels).
+    """
+    for name, value, minimum in (
+        ("divider", divider, 1),
+        ("chunk_size", chunk_size, 1),
+        ("progress_every", progress_every, 0),
+    ):
+        if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)) or value < minimum:
+            raise ValueError(f"{name} must be an integer >= {minimum}.")
+    divider = int(divider)
+    if filename is None:
+        filename = _open_file_dialog(
+            "Select timetag file to divide",
+            [
+                ("Timetag files", "*.ttbin *.internet.bin *.h5 *.hdf5 *.npz *.mat"),
+                ("HydraHarp raw files", "*.internet.bin"),
+                ("All files", "*.*"),
+            ],
+        )
+    filename = _require_selected_filename(filename, "timetag file")
+    source = Path(filename)
+    suffix = source.suffix.lower()
+    is_hydraharp = source.name.lower().endswith(".internet.bin")
+    if suffix == ".ttbin":
+        source = _timetagger_sequence_header_filename(source)
+    if not source.is_file():
+        raise FileNotFoundError(f"Timetag file was not found: {source}")
+
+    if suffix == ".ttbin":
+        t_dtype, ch_dtype = np.dtype(np.int64), np.dtype(np.uint8)
+        chunks = _iter_timetagger_ttbin_chunks(source, chunk_size=chunk_size)
+    elif is_hydraharp:
+        t_dtype, ch_dtype = np.dtype(np.int64), np.dtype(np.uint8)
+        chunks = _iter_hydraharp_qsfp_chunks(
+            source, chunk_size=chunk_size,
+            base_resolution_ps=hydraharp_base_resolution_ps,
+        )
+    elif suffix in (".h5", ".hdf5"):
+        with h5py.File(source, "r") as h5:
+            if "t_ps" not in h5 or "ch" not in h5:
+                raise ValueError("Input H5 must contain t_ps and ch datasets.")
+            if h5["t_ps"].ndim != 1 or h5["ch"].ndim != 1:
+                raise ValueError("t_ps and ch must be one-dimensional.")
+            if len(h5["t_ps"]) != len(h5["ch"]):
+                raise ValueError("t_ps and ch must have the same length.")
+            t_dtype, ch_dtype = h5["t_ps"].dtype, h5["ch"].dtype
+
+        def h5_chunks():
+            with h5py.File(source, "r") as h5:
+                for start in range(0, len(h5["t_ps"]), chunk_size):
+                    yield h5["t_ps"][start:start + chunk_size], h5["ch"][start:start + chunk_size]
+
+        chunks = h5_chunks()
+    elif suffix in (".npz", ".mat"):
+        t_ps, ch = _load_timetag_arrays(source)
+        if len(t_ps) != len(ch):
+            raise ValueError("t_ps and ch must have the same length.")
+        t_dtype, ch_dtype = t_ps.dtype, ch.dtype
+        chunks = (
+            (t_ps[start:start + chunk_size], ch[start:start + chunk_size])
+            for start in range(0, len(t_ps), chunk_size)
+        )
+    else:
+        raise ValueError(f"Unsupported file type: {suffix}")
+
+    if not (np.issubdtype(t_dtype, np.integer) or np.issubdtype(t_dtype, np.floating)):
+        raise ValueError("Timestamps must have a real numeric dtype.")
+    if not np.issubdtype(ch_dtype, np.integer):
+        raise ValueError("Channels must have an integer dtype.")
+    output_path = (
+        Path(output_filename) if output_filename is not None
+        else source.with_name(f"{source.stem}_div{divider}.h5")
+    )
+    channel_counts = {}
+    n_input = n_saved = 0
+    next_progress = progress_every
+    with h5py.File(output_path, "x") as h5:
+        h5.attrs["source_filename"] = str(source)
+        h5.attrs["timestamp_unit"] = "ps"
+        h5.attrs["channel_record_divider"] = divider
+        h5.attrs["divider_first_tag_retained"] = True
+        if is_hydraharp:
+            h5.attrs["source_format"] = "hydraharp_v2_t2"
+            h5.attrs["hydraharp_base_resolution_ps"] = hydraharp_base_resolution_ps
+            h5.attrs["hydraharp_channel_offset"] = 0
+            h5.attrs["timestamps_rebased"] = False
+        t_ds = h5.create_dataset(
+            "t_ps", shape=(0,), maxshape=(None,), dtype=t_dtype,
+            chunks=(min(chunk_size, 1_000_000),), compression=compression,
+        )
+        ch_ds = h5.create_dataset(
+            "ch", shape=(0,), maxshape=(None,), dtype=ch_dtype,
+            chunks=(min(chunk_size, 1_000_000),), compression=compression,
+        )
+        for t_chunk, ch_chunk in chunks:
+            if suffix == ".ttbin" and len(ch_chunk):
+                if ch_chunk.min() < 0 or ch_chunk.max() > 255:
+                    raise ValueError("Time Tagger channel values must fit in uint8.")
+            n_input += len(t_chunk)
+            keep = np.zeros(len(ch_chunk), dtype=bool)
+            for channel in np.unique(ch_chunk):
+                indices = np.flatnonzero(ch_chunk == channel)
+                count = channel_counts.get(int(channel), 0)
+                keep[indices[(-count) % divider::divider]] = True
+                channel_counts[int(channel)] = count + len(indices)
+            n_new = int(np.count_nonzero(keep))
+            t_ds.resize(n_saved + n_new, axis=0)
+            ch_ds.resize(n_saved + n_new, axis=0)
+            t_ds[n_saved:n_saved + n_new] = t_chunk[keep]
+            ch_ds[n_saved:n_saved + n_new] = ch_chunk[keep]
+            n_saved += n_new
+            while progress_every and n_input >= next_progress:
+                print(f"Processed input records: {next_progress:,}; saved: {n_saved:,}")
+                next_progress += progress_every
+        if sort_by_timestamp:
+            _sort_h5_timetags(t_ds, ch_ds)
+            h5.attrs["timestamp_sort_order"] = "stable ascending t_ps"
+        h5.attrs["timestamps_sorted"] = bool(sort_by_timestamp)
+        h5.attrs["input_records"] = n_input
+        h5.attrs["saved_records"] = n_saved
+
+    print(f"Divider: {divider} per channel; kept {n_saved:,} of {n_input:,} tags.")
+    print(f"Saved H5 file: {output_path}")
+    return str(output_path)
+
+
 def timetag_to_h5_qutag(
     filename=None,
     header_lines=1,

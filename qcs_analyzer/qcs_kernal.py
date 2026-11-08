@@ -901,8 +901,8 @@ def qcs_kernal_sep(
         "tau_ps": float(tau_ps_init),
         "tau_rt_ps": float(tau_rt_ps_init),
         "epsilon_ps": float(0.0),
-        # "tau_span_ps": float(tau_span_ps_init),
-        "tau_span_ps": np.rint(float(1e12)/Freq) * 1.6,
+        "tau_span_ps": float(tau_span_ps_init),
+        # "tau_span_ps": np.rint(float(1e12)/Freq) * 1.6,
         "u0": float(u0_init),
         "T_lastmid_ps": float(0.0),
         "T_lastu0_ps": float(0.0),
@@ -1060,8 +1060,8 @@ def qcs_kernal_sep(
         tau_predicted_ps = state["tau_ps"] + (acquisition["point_ps"] - state["T_lastmid_ps"]) * state["u0"]
         t_lo = tau_predicted_ps - state["tau_span_ps"] * 0.5
         t_hi = tau_predicted_ps + state["tau_span_ps"] * 0.5
-        t_lo = tau_ps_init - state["tau_span_ps"] * 0.5
-        t_hi = tau_ps_init + state["tau_span_ps"] * 0.5
+        # t_lo = tau_ps_init - state["tau_span_ps"] * 0.5
+        # t_hi = tau_ps_init + state["tau_span_ps"] * 0.5
         time_bin_ps = state["time_bin_ps"]
         edges = np.arange(t_lo, t_hi + time_bin_ps, time_bin_ps)
         if len(edges) < 2:
