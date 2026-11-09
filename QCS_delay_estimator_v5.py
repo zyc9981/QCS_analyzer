@@ -16,6 +16,7 @@ For new code, import from the focused ``qcs_analyzer`` modules instead:
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.fft import fft
 from qcs_analyzer import *
 from qcs_analyzer import __all__ as _QCS_ANALYZER_PUBLIC_API
 from qcs_analyzer.analysis import g2_process_sep, timetag_correction_sep
@@ -27,6 +28,7 @@ from qcs_analyzer.allan_deviation import (
     allan_deviation_estimator_single_channel,
     allan_deviation_estimator_tau_input,
 )
+from qcs_analyzer.global_freq_analysis import global_freq_alignment, global_freq_alignment_g2
 
 __all__ = _QCS_ANALYZER_PUBLIC_API
 
@@ -35,7 +37,7 @@ if __name__ == "__main__":
     # timetag_to_h5_sep()
     # timetag_to_h5_TTXonly()
     # timetag_to_h5_divider(divider=10)
-    # truncate_timetag_sep(40)
+    # truncate_timetag_sep(2)
     # sys.exit()
 
     # results = load_g2_results()
@@ -141,13 +143,17 @@ if __name__ == "__main__":
         # correction_mode="per_trigger",
     )
 
-    # # Check reference jitter
-    # ref0 = t_ps[ch==3]
-    # ref1 = t_ps[ch==7]
-    # ref_diff = ref0 - ref1
-    # ref_jitter = np.std(ref_diff, ddof=1)
-    # print(f"Reference jitter: {ref_jitter:.8g}")
-    # sys.exit()
+    result = global_freq_alignment_g2(
+        t1_ps[ch1 == 1],
+        t2_ps[ch2 == 6],
+        sweep_center_ps_per_s=-10000,
+        sweep_range_ps_per_s=500,
+        # show_plot=True,
+    )
+
+    print(f"Clock skew correction: {result['skew_s_per_s']:.3e} s/s")
+    print(f"Relative offset: {result['offset_ps']:.1f} ps")
+    sys.exit()
 
     Ta_s = 1.0
     qcs_result = qcs_kernal_sep(
