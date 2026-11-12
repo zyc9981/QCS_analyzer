@@ -1041,6 +1041,7 @@ def timetag_to_h5_sep(
     ch_trig_time_tagger=3,
     ch_trig_hh=7,
     hydraharp_base_resolution_ps=1,
+    align_triggers=True,
 ):
     """Save Time Tagger X and HydraHarp events as separate HDF5 streams.
 
@@ -1049,7 +1050,9 @@ def timetag_to_h5_sep(
     use HydraHarp V2 T2 format; its base resolution defaults to 1 ps and can
     be set with ``hydraharp_base_resolution_ps``. Overflow and marker records
     are excluded. Channels are normalized/offset exactly as in
-    :func:`timetag_to_h5`, and each source's first trigger is rebased to zero.
+    :func:`timetag_to_h5`. By default each source's first trigger is rebased
+    to zero; set ``align_triggers=False`` to preserve each stream's original
+    timestamps without finding or applying trigger offsets.
     Events remain in their source order; the two streams are never merged.
     Use ``load_timetag_sep`` and ``truncate_timetag_sep`` for this layout;
     ``load_timetag`` and ``truncate_timetag`` expect ``t_ps``/``ch`` datasets.
@@ -1088,30 +1091,36 @@ def timetag_to_h5_sep(
     if output_path.exists():
         raise FileExistsError(f"Refusing to overwrite existing file: {output_path}")
 
-    # Find each first trigger without retaining every trigger timestamp.
-    time_tagger_initial_trigger_t_ps = _initial_t_ps_for_channel(
-        _iter_timetagger_ttbin_chunks(time_tagger_path, chunk_size=chunk_size),
-        ch_trig_time_tagger,
-        "Time Tagger X",
-    )
-    hydraharp_initial_trigger_t_ps = _initial_t_ps_for_channel(
-        _iter_hydraharp_qsfp_chunks(
-            hydraharp_path,
-            chunk_size=chunk_size,
-            channel_offset=hydraharp_channel_offset,
-            base_resolution_ps=hydraharp_base_resolution_ps,
-        ),
-        ch_trig_hh,
-        "HydraHarp",
-    )
-    time_tagger_time_offset_ps = -time_tagger_initial_trigger_t_ps
-    hydraharp_time_offset_ps = -hydraharp_initial_trigger_t_ps
-
-    print(
-        "Trigger alignment (first triggers rebased to zero): "
-        f"Time Tagger X ch {ch_trig_time_tagger} at {time_tagger_initial_trigger_t_ps} ps; "
-        f"HydraHarp ch {ch_trig_hh} at {hydraharp_initial_trigger_t_ps} ps"
-    )
+    if align_triggers:
+        # Find each first trigger without retaining every trigger timestamp.
+        time_tagger_initial_trigger_t_ps = _initial_t_ps_for_channel(
+            _iter_timetagger_ttbin_chunks(time_tagger_path, chunk_size=chunk_size),
+            ch_trig_time_tagger,
+            "Time Tagger X",
+        )
+        hydraharp_initial_trigger_t_ps = _initial_t_ps_for_channel(
+            _iter_hydraharp_qsfp_chunks(
+                hydraharp_path,
+                chunk_size=chunk_size,
+                channel_offset=hydraharp_channel_offset,
+                base_resolution_ps=hydraharp_base_resolution_ps,
+            ),
+            ch_trig_hh,
+            "HydraHarp",
+        )
+        time_tagger_time_offset_ps = -time_tagger_initial_trigger_t_ps
+        hydraharp_time_offset_ps = -hydraharp_initial_trigger_t_ps
+        print(
+            "Trigger alignment (first triggers rebased to zero): "
+            f"Time Tagger X ch {ch_trig_time_tagger} at {time_tagger_initial_trigger_t_ps} ps; "
+            f"HydraHarp ch {ch_trig_hh} at {hydraharp_initial_trigger_t_ps} ps"
+        )
+    else:
+        time_tagger_initial_trigger_t_ps = None
+        hydraharp_initial_trigger_t_ps = None
+        time_tagger_time_offset_ps = 0
+        hydraharp_time_offset_ps = 0
+        print("Trigger alignment disabled; preserving original timestamps.")
 
     def write_stream(h5, time_name, channel_name, chunks):
         dataset_chunk_size = min(int(chunk_size), 1_000_000)
@@ -1137,7 +1146,7 @@ def timetag_to_h5_sep(
         next_progress = progress_every
         for times, channels in chunks:
             nonnegative = times >= 0
-            if not np.all(nonnegative):
+            if align_triggers and not np.all(nonnegative):
                 removed += len(times) - int(np.count_nonzero(nonnegative))
                 times = times[nonnegative]
                 channels = channels[nonnegative]
@@ -1169,9 +1178,12 @@ def timetag_to_h5_sep(
         h5.attrs["hydraharp_channel_offset"] = int(hydraharp_channel_offset)
         h5.attrs["time_tagger_x_trigger_channel"] = int(ch_trig_time_tagger)
         h5.attrs["hydraharp_trigger_channel"] = int(ch_trig_hh)
-        h5.attrs["time_tagger_x_initial_trigger_t_ps"] = time_tagger_initial_trigger_t_ps
-        h5.attrs["hydraharp_initial_trigger_t_ps"] = hydraharp_initial_trigger_t_ps
-        h5.attrs["alignment_reference"] = "each_tagger_first_trigger_at_zero"
+        h5.attrs["alignment_reference"] = (
+            "each_tagger_first_trigger_at_zero" if align_triggers else "none_original_timestamps"
+        )
+        if align_triggers:
+            h5.attrs["time_tagger_x_initial_trigger_t_ps"] = time_tagger_initial_trigger_t_ps
+            h5.attrs["hydraharp_initial_trigger_t_ps"] = hydraharp_initial_trigger_t_ps
         h5.attrs["time_tagger_x_time_offset_ps"] = time_tagger_time_offset_ps
         h5.attrs["hydraharp_time_offset_ps"] = hydraharp_time_offset_ps
 

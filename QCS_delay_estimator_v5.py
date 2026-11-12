@@ -35,6 +35,7 @@ __all__ = _QCS_ANALYZER_PUBLIC_API
 
 if __name__ == "__main__":
     # timetag_to_h5_sep()
+    # timetag_to_h5_sep(align_triggers=False)
     # timetag_to_h5_TTXonly()
     # timetag_to_h5_divider(divider=10)
     # truncate_timetag_sep(2)
@@ -103,6 +104,21 @@ if __name__ == "__main__":
     t1_ps, ch1, t2_ps, ch2, filename = load_timetag_sep()
     print(r"Data import complete.")
 
+    # t01_us = 1794337862493679
+    # t02_us = 1794337862881127
+    # # offset_ps = (t02_us - t01_us) * 1_000_000 - 20_000_000_000
+    # offset_ps = (t02_us - t01_us) * 1_000_000
+
+    # a = t1_ps[ch1==3][0] - t1_ps[0]
+    # b = t2_ps[ch2==7][0] - t2_ps[0] + offset_ps
+    # # b = t2_ps[ch2==7][0] - t2_ps[0]
+    # print(a * 1e-9)
+    # print(b * 1e-9)
+    # print(b * 1e-9 - a * 1e-9)
+    # t1_ps = t1_ps - t1_ps[0]
+    # t2_ps = t2_ps - t2_ps[0] + offset_ps
+    # sys.exit()
+
     # region ADEV
     # Single-channel ADEV against tagger 1's timebase, using uncorrected data.
     # adev_result = allan_deviation_estimator_single_channel(
@@ -132,7 +148,7 @@ if __name__ == "__main__":
     # # save_dict_npz(adev_result)
     # sys.exit()
     # endregion
-
+    
     t1_ps, ch1, t2_ps, ch2, details = timetag_correction_sep(
         t1_ps, ch1, t2_ps, ch2,
         ch_qutag=3,
@@ -143,19 +159,22 @@ if __name__ == "__main__":
         # correction_mode="per_trigger",
     )
 
-    result = global_freq_alignment_g2(
-        t1_ps[ch1 == 1],
-        t2_ps[ch2 == 6],
-        sweep_center_ps_per_s=-10000,
-        sweep_range_ps_per_s=500,
-        # show_plot=True,
-    )
+    # result = global_freq_alignment_g2(
+    #     t1_ps[ch1 == 1],
+    #     t2_ps[ch2 == 6],
+    #     init_time_offset_range_ms=50,
+    #     init_bin_number=500000,
+    #     sweep_center_ps_per_s=0,
+    #     sweep_range_ps_per_s=200,
+    #     coarse_steps=50,
+    #     time_offset_range_ns=1000,
+    #     show_plot=True,
+    # )
+    # print(f"Clock skew correction: {result['skew_s_per_s']:.3e} s/s")
+    # print(f"Relative offset: {result['offset_ps']:.1f} ps")
+    # sys.exit()
 
-    print(f"Clock skew correction: {result['skew_s_per_s']:.3e} s/s")
-    print(f"Relative offset: {result['offset_ps']:.1f} ps")
-    sys.exit()
-
-    Ta_s = 1.0
+    Ta_s = 2.0
     qcs_result = qcs_kernal_sep(
         t1_ps,
         ch1,
@@ -175,7 +194,7 @@ if __name__ == "__main__":
 
         # Ta_ref_s=0.1,
         Ta_ref_s=Ta_s,
-        # show_fit=True,
+        show_fit=True,
         # second_order_fit=True,
 
         # Ta_rt_s_max=30,

@@ -389,18 +389,22 @@ def global_freq_alignment_g2(
 ):
     """Estimate relative clock skew by sweeping a g2 delay histogram.
 
-    First apply ``sweep_center_ps_per_s`` to stream 2 and calculate a g2 histogram over
-    ``+/-init_time_offset_range_ms`` and find its highest bin. Then sweep
+    First apply ``sweep_center_ps_per_s`` to stream 2 and use FFT cross-correlation
+    of coarse timestamp histograms over ``+/-init_time_offset_range_ms`` to find
+    the initial delay. Alternatively, pass ``(min_ms, max_ms)`` to search an
+    explicit interval such as ``(20, 80)``. Then sweep
     skew over a fixed window centered on that bin's center, extending
     ``+/-time_offset_range_ns``. Initialization uses ``init_bin_number``
-    bins (default 10,000); the sweep uses ``max_bin_number`` bins.
+    correlation-delay bins across the full initial delay span (default 10,000);
+    the sweep uses ``max_bin_number`` bins.
     Each stage's bin width is its full delay span divided by the bin count.
     Trial skew corrections run from ``sweep_center_ps_per_s -
     sweep_range_ps_per_s`` to ``sweep_center_ps_per_s + sweep_range_ps_per_s``.
     Initialization and each trial apply their absolute correction to the
     original timestamps; the sweep does not apply the center correction twice.
 
-    Each trial applies a linear time correction to stream 2 and calculates
+    Initialization uses FFT cross-correlation of coarse binned event streams.
+    Each sweep trial applies a linear time correction to stream 2 and calculates
     the pair-delay histogram with :func:`qcs_kernal.g2_histogram_numba`. The
     candidate with the strongest peak above the histogram background is kept.
 
@@ -422,13 +426,9 @@ def global_freq_alignment_g2(
     The result's ``offset_ps`` is then added to align its g2 peak to zero.
     Returned timestamps are relative to ``time_origin_ps``.
 
-    With ``show_plot=True``, a separate initialization figure displays the
-    broad histogram, selected peak and sweep delay window without pausing
-    the calculation. Every completed candidate then shows all histogram
-    bins, a zoom around the first candidate's peak, the difference from the
-    preceding candidate, and the scores so far. One window updates after
-    each completed point and the sweep advances automatically. Close the
-    final plot after the sweep to finish. No plot bins are skipped.
+    With ``show_plot=True``, show the initialization histogram before the
+    sweep and a final figure after it completes. The final figure contains
+    the selected g2 histogram and the completed sweep scores.
 
     The pair counter counts all event pairs inside the selected delay range.
     Consequently, runtime scales with the number of pairs in that range, not
@@ -444,14 +444,32 @@ def global_freq_alignment_g2(
 
     sweep_range_ps_per_s = float(sweep_range_ps_per_s)
     sweep_center_ps_per_s = float(sweep_center_ps_per_s)
-    init_time_offset_range_ms = float(init_time_offset_range_ms)
     time_offset_range_ns = float(time_offset_range_ns)
     if not np.isfinite(sweep_range_ps_per_s) or sweep_range_ps_per_s <= 0:
         raise ValueError("sweep_range_ps_per_s must be finite and positive.")
     if not np.isfinite(sweep_center_ps_per_s):
         raise ValueError("sweep_center_ps_per_s must be finite.")
-    if not np.isfinite(init_time_offset_range_ms) or init_time_offset_range_ms <= 0:
-        raise ValueError("init_time_offset_range_ms must be finite and positive.")
+    init_range_was_scalar = np.isscalar(init_time_offset_range_ms)
+    if init_range_was_scalar:
+        range_value = float(init_time_offset_range_ms)
+        if not np.isfinite(range_value) or range_value <= 0:
+            raise ValueError("init_time_offset_range_ms must be finite and positive.")
+        init_min_ms, init_max_ms = -range_value, range_value
+    else:
+        try:
+            init_min_ms, init_max_ms = map(float, init_time_offset_range_ms)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "init_time_offset_range_ms must be a positive scalar or a "
+                "(min_ms, max_ms) pair."
+            ) from exc
+        if (
+            not np.isfinite(init_min_ms)
+            or not np.isfinite(init_max_ms)
+            or init_min_ms >= init_max_ms
+        ):
+            raise ValueError("Explicit range must have finite bounds with min_ms < max_ms.")
+    init_time_offset_range_ms = (init_min_ms, init_max_ms)
     if not np.isfinite(time_offset_range_ns) or time_offset_range_ns <= 0:
         raise ValueError("time_offset_range_ns must be finite and positive.")
     if not np.isfinite(init_bin_number) or int(init_bin_number) != init_bin_number or init_bin_number < 2:
@@ -474,32 +492,41 @@ def global_freq_alignment_g2(
         raise ValueError("Each timestamp array must span a positive duration.")
 
     acquisition_duration_s = duration_ps * 1e-12
-    init_half_range_ps = init_time_offset_range_ms * 1e9
-    init_edges_ps = np.linspace(
-        -init_half_range_ps,
-        init_half_range_ps,
-        int(init_bin_number) + 1,
-        dtype=np.float64,
-    )
-    init_bin_width_ps = float(init_edges_ps[1] - init_edges_ps[0])
-    print(
-        f"g2 initialization: skew={sweep_center_ps_per_s:+.3f} ps/s, "
-        f"range=+/-{init_time_offset_range_ms:g} ms, "
-        f"bins={int(init_bin_number):,}, "
-        f"bin width={init_bin_width_ps:.3f} ps",
-        flush=True,
-    )
+    init_min_ps = init_min_ms * 1e9
+    init_max_ps = init_max_ms * 1e9
+    init_bin_width_ps = (init_max_ps - init_min_ps) / int(init_bin_number)
     init_second_ps = second_ps + second_elapsed_ps * (sweep_center_ps_per_s * 1e-12)
-    init_result = g2_histogram_numba(
-        first_ps, init_second_ps, init_edges_ps,
-        Ta_s=acquisition_duration_s, chA=None, chB=None,
-        time_bin_ps_init=init_bin_width_ps,
+    # Coarsely bin both streams and compute their linear cross-correlation
+    # using FFTs. Padding to at least twice the time-grid length prevents
+    # circular wraparound; only delays within the requested initialization
+    # range are retained.
+    first_bin = np.floor(first_ps / init_bin_width_ps).astype(np.int64)
+    second_bin = np.floor(init_second_ps / init_bin_width_ps).astype(np.int64)
+    n_time_bins = max(int(first_bin.max()), int(second_bin.max())) + 1
+    first_hist = np.bincount(first_bin, minlength=n_time_bins).astype(np.float64)
+    second_hist = np.bincount(second_bin, minlength=n_time_bins).astype(np.float64)
+    n_fft = 1 << (2 * n_time_bins - 2).bit_length()
+    correlation_circular = np.fft.irfft(
+        np.fft.rfft(second_hist, n=n_fft)
+        * np.conj(np.fft.rfft(first_hist, n=n_fft)),
+        n=n_fft,
     )
-    init_histogram = init_result["histogram_raw"]
+    min_lag_bin = max(int(np.ceil(init_min_ps / init_bin_width_ps)), -(n_time_bins - 1))
+    max_lag_bin = min(int(np.floor(init_max_ps / init_bin_width_ps)), n_time_bins - 1)
+    if min_lag_bin > max_lag_bin:
+        raise ValueError(
+            "The requested initialization interval does not overlap the "
+            "available correlation lags."
+        )
+    init_lag_bins = np.arange(min_lag_bin, max_lag_bin + 1, dtype=np.int64)
+    init_histogram = np.rint(
+        correlation_circular[np.mod(init_lag_bins, n_fft)]
+    ).astype(np.int64)
+    init_centers_ps = init_lag_bins.astype(np.float64) * init_bin_width_ps
     init_peak_index = int(np.argmax(init_histogram))
     if init_histogram[init_peak_index] == 0:
         raise ValueError("No event pairs inside the initial delay range; cannot locate a peak.")
-    init_peak_delay_ps = float(init_edges_ps[init_peak_index]) + init_bin_width_ps / 2
+    init_peak_delay_ps = float(init_centers_ps[init_peak_index])
     half_range_ps = time_offset_range_ns * 1e3
     edges_ps = np.linspace(
         init_peak_delay_ps - half_range_ps,
@@ -521,7 +548,7 @@ def global_freq_alignment_g2(
         import matplotlib.pyplot as plt
 
         init_figure, init_axis = plt.subplots(figsize=(10, 5))
-        init_centers_ms = (init_edges_ps[:-1] + init_bin_width_ps / 2) * 1e-9
+        init_centers_ms = init_centers_ps * 1e-9
         init_axis.plot(init_centers_ms, init_histogram, lw=1, label="Initial g2")
         init_axis.axvline(
             init_peak_delay_ps * 1e-9, color="tab:red", linestyle="--",
@@ -554,14 +581,7 @@ def global_freq_alignment_g2(
         changed_bins = np.zeros(len(candidates), dtype=np.int64)
         max_count_changes = np.zeros(len(candidates), dtype=np.int64)
         previous_histogram = None
-        zoom_center_index = None
         best = None
-        displayed_max_count = 1.0
-        if show_plot:
-            import matplotlib.pyplot as plt
-
-            figure, axes = plt.subplots(2, 2, figsize=(12, 8))
-            plt.show(block=False)
         for index, skew in enumerate(candidates):
             # Every trial starts with the original array, anchored at the
             # same reference event. No previous trial feeds into this one.
@@ -597,101 +617,10 @@ def global_freq_alignment_g2(
             peak_counts[index] = peak
             background_counts[index] = background
             peak_delays_ps[index] = bin_centers_ns[peak_index] * 1e3
-            if previous_histogram is None:
-                difference = np.zeros_like(histogram)
-                zoom_center_index = peak_index
-            else:
+            if previous_histogram is not None:
                 difference = histogram - previous_histogram
                 changed_bins[index] = np.count_nonzero(difference)
                 max_count_changes[index] = np.max(np.abs(difference))
-            print(
-                f"g2 sweep {index + 1}/{len(candidates)}: "
-                f"skew={float(skew) * 1e12:+.3f} ps/s, "
-                f"peak={peak:,}, background={background:.3f}, score={score:.3f}, "
-                f"changed bins={changed_bins[index]:,}/{histogram.size:,}, "
-                f"max count change={max_count_changes[index]:,}, "
-                f"last-tag correction={second_elapsed_ps[-1] * float(skew):+.3f} ps"
-                + (" (first point is the reference)" if index == 0 else ""),
-                flush=True,
-            )
-            if show_plot and plt.fignum_exists(figure.number):
-                for axis in axes.ravel():
-                    axis.clear()
-                hist_axis, zoom_axis, difference_axis, score_axis = axes.ravel()
-                hist_axis.plot(bin_centers_ns, histogram, lw=1)
-                hist_axis.axvline(
-                    bin_centers_ns[peak_index], color="tab:red", linestyle="--",
-                    label="Largest bin",
-                )
-                hist_axis.axhline(
-                    background, color="0.5", linestyle=":", label="Median background"
-                )
-                hist_axis.set_title(
-                    f"Full g2 histogram ({histogram.size:,} bins)"
-                )
-                hist_axis.set_xlabel("Delay t2 - t1 (ns)")
-                hist_axis.set_ylabel("Pair count per bin")
-                hist_axis.grid(True, alpha=0.3)
-                hist_axis.legend()
-
-                # Keep the zoom at the same delays throughout the sweep so
-                # a moving peak is not silently recentered at every point.
-                zoom = slice(
-                    max(0, zoom_center_index - 50),
-                    min(histogram.size, zoom_center_index + 51),
-                )
-                if previous_histogram is not None:
-                    zoom_axis.plot(
-                        bin_centers_ns[zoom], previous_histogram[zoom],
-                        color="0.6", linestyle="--", label="Previous point",
-                    )
-                zoom_axis.plot(
-                    bin_centers_ns[zoom], histogram[zoom], ".-", label="Current point"
-                )
-                zoom_axis.set_title("Fixed zoom around first point's peak")
-                zoom_axis.set_xlabel("Delay t2 - t1 (ns)")
-                zoom_axis.set_ylabel("Pair count per bin")
-                zoom_axis.grid(True, alpha=0.3)
-                zoom_axis.legend()
-                # Do not amplify weaker candidates by rescaling their peak
-                # back to the top of the axes. Always include zero and keep
-                # the upper limit at least as high as all earlier trials.
-                displayed_max_count = max(displayed_max_count, float(peak))
-                hist_axis.set_ylim(0, 1.05 * displayed_max_count)
-                zoom_axis.set_ylim(0, 1.05 * displayed_max_count)
-
-                difference_axis.plot(bin_centers_ns, difference, lw=1)
-                difference_axis.axhline(0, color="0.6", linewidth=0.8)
-                difference_axis.set_title(
-                    f"Current minus previous: {changed_bins[index]:,} changed bins"
-                    if index else "First point: reference histogram"
-                )
-                difference_axis.set_xlabel("Delay t2 - t1 (ns)")
-                difference_axis.set_ylabel("Count difference")
-                difference_axis.grid(True, alpha=0.3)
-
-                score_axis.plot(candidates[: index + 1] * 1e12, scores[: index + 1], ".-")
-                score_axis.axvline(float(skew) * 1e12, color="tab:red", linestyle="--")
-                score_axis.set_xlim(
-                    candidates[0] * 1e12 - 0.05 * sweep_range_ps_per_s,
-                    candidates[-1] * 1e12 + 0.05 * sweep_range_ps_per_s,
-                )
-                score_axis.set_title("Coarse sweep scores so far")
-                score_axis.set_xlabel("Applied skew (ps/s)")
-                score_axis.set_ylabel("Peak score")
-                score_axis.grid(True, alpha=0.3)
-
-                figure.suptitle(
-                    f"Point {index + 1}/{len(candidates)}: "
-                    f"skew={float(skew) * 1e12:+.3f} ps/s, score={score:.3f}"
-                )
-                figure.subplots_adjust(
-                    left=0.08, right=0.96, bottom=0.09, top=0.9,
-                    hspace=0.55, wspace=0.3,
-                )
-                figure.canvas.draw()
-                figure.canvas.flush_events()
-                plt.pause(0.05)
             score_tied = best is not None and np.isclose(
                 score, best["score"], rtol=1e-12, atol=1e-12
             )
@@ -709,8 +638,6 @@ def global_freq_alignment_g2(
                     "histogram": histogram,
                 }
             previous_histogram = histogram.copy()
-        if show_plot and plt.fignum_exists(figure.number):
-            plt.show(block=True)
         return (
             best, np.asarray(candidates), scores, changed_bins, max_count_changes,
             peak_counts, background_counts, peak_delays_ps,
@@ -721,23 +648,6 @@ def global_freq_alignment_g2(
         sweep_center_ps_per_s + sweep_range_ps_per_s,
         int(coarse_steps),
     ) * 1e-12
-    print(
-        f"g2 sweep setup: center={sweep_center_ps_per_s:+.3f} ps/s, "
-        f"range=+/-{sweep_range_ps_per_s:.3f} ps/s, "
-        f"bin width={bin_width_ps:.3f} ps, "
-        f"stream-2 duration={second_elapsed_ps[-1] * 1e-12:.6f} s, "
-        f"full sweep endpoint shift={2 * skew_range_s_per_s * second_elapsed_ps[-1]:.3f} ps, "
-        f"adjacent-point endpoint shift="
-        f"{(coarse_candidates[1] - coarse_candidates[0]) * second_elapsed_ps[-1]:.3f} ps",
-        flush=True,
-    )
-    half_range_shift_ps = skew_range_s_per_s * second_elapsed_ps[-1]
-    print(
-        f"At either search boundary, drift relative to the sweep center spans "
-        f"{half_range_shift_ps / bin_width_ps:.6g} histogram bins. "
-        "A wrong skew broadens pair delays; it does not remove the pairs.",
-        flush=True,
-    )
     (
         coarse_best, coarse_x, coarse_scores, changed_bins, max_count_changes,
         peak_counts, background_counts, peak_delays_ps,
@@ -749,13 +659,49 @@ def global_freq_alignment_g2(
     t2_aligned_ps = second_ps + second_elapsed_ps * best["skew"] + offset_ps
     tied_best = np.isclose(coarse_scores, best["score"], rtol=1e-12, atol=1e-12)
     unique_best_candidate = np.count_nonzero(tied_best) == 1
-    if not unique_best_candidate:
-        print(
-            f"{np.count_nonzero(tied_best)} trial skews tie for the best score: "
-            "this sweep does not resolve a unique skew. Returning the "
-            "smallest-magnitude tied candidate.",
-            flush=True,
+    tied_message = (
+        f"; {np.count_nonzero(tied_best)} candidates tie, so the result is not unique"
+        if not unique_best_candidate
+        else ""
+    )
+    print(
+        f"g2 sweep complete: skew={best['skew'] * 1e12:+.3f} ps/s, "
+        f"peak delay={peak_delay_ps * 1e-3:.6f} ns, "
+        f"peak={best['peak']:,}, background={best['background']:.3f}, "
+        f"score={best['score']:.3f}{tied_message}",
+        flush=True,
+    )
+
+    if show_plot:
+        import matplotlib.pyplot as plt
+
+        final_figure, final_axes = plt.subplots(1, 2, figsize=(12, 4.5))
+        final_hist_axis, final_score_axis = final_axes
+        final_hist_axis.plot(bin_centers_ns, best["histogram"], lw=1)
+        final_hist_axis.axvline(
+            bin_centers_ns[best["peak_index"]],
+            color="tab:red", linestyle="--", label="Selected peak",
         )
+        final_hist_axis.axhline(
+            best["background"], color="0.5", linestyle=":", label="Median background"
+        )
+        final_hist_axis.set_title("Final g2 histogram")
+        final_hist_axis.set_xlabel("Delay t2 - t1 (ns)")
+        final_hist_axis.set_ylabel("Pair count per bin")
+        final_hist_axis.grid(True, alpha=0.3)
+        final_hist_axis.legend()
+
+        final_score_axis.plot(coarse_x * 1e12, coarse_scores, ".-")
+        final_score_axis.axvline(
+            best["skew"] * 1e12, color="tab:red", linestyle="--", label="Selected skew"
+        )
+        final_score_axis.set_title("Completed coarse sweep")
+        final_score_axis.set_xlabel("Applied skew (ps/s)")
+        final_score_axis.set_ylabel("Peak score")
+        final_score_axis.grid(True, alpha=0.3)
+        final_score_axis.legend()
+        final_figure.tight_layout()
+        plt.show()
 
     return {
         "skew_s_per_s": best["skew"],
@@ -772,13 +718,17 @@ def global_freq_alignment_g2(
         "duration_s": acquisition_duration_s,
         "time_origin_ps": time_origin_ps.item(),
         "correction_reference_ps": correction_reference_ps,
-        "init_time_offset_range_ms": init_time_offset_range_ms,
+        "init_time_offset_range_ms": (
+            float(range_value)
+            if init_range_was_scalar
+            else (float(init_min_ms), float(init_max_ms))
+        ),
         "sweep_center_ps_per_s": sweep_center_ps_per_s,
         "time_offset_range_ns": time_offset_range_ns,
         "init_peak_delay_ps": init_peak_delay_ps,
         "init_bin_width_ps": init_bin_width_ps,
         "init_bin_number": int(init_bin_number),
-        "init_bin_centers_ns": (init_edges_ps[:-1] + init_bin_width_ps / 2) * 1e-3,
+        "init_bin_centers_ns": init_centers_ps * 1e-3,
         "init_g2_histogram": init_histogram,
         "sweep_delay_range_ps": np.array([edges_ps[0], edges_ps[-1]]),
         "sweep_skew_ps_per_s": coarse_x * 1e12,

@@ -17,7 +17,7 @@ from tkinter import Tk, filedialog
 import numpy as np
 
 from qcs_analyzer.config import get_default_file_dialog_directory
-from qcs_analyzer.io import load_timetag, timetag_to_h5_TTXonly
+from qcs_analyzer.io import load_timetag, timetag_to_h5_TTXonly, timetag_to_h5_sep
 
 
 def convert_files(filenames):
@@ -46,7 +46,8 @@ def convert_files(filenames):
             skipped += 1
             continue
         try:
-            timetag_to_h5_TTXonly(filename=source, output_filename=output)
+            # timetag_to_h5_TTXonly(filename=source, output_filename=output)
+            timetag_to_h5_sep(filename=source, output_filename=output, align_triggers=False)
         except Exception as exc:
             print(f"FAILED: {source.name}: {exc}")
             if output.exists():
